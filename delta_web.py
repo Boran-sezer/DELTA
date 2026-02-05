@@ -37,8 +37,6 @@ with st.sidebar:
         doc_ref.update({"faits": []})
         st.rerun()
     st.write("---")
-    if not faits:
-        st.write("Aucune donnée.")
     for i, fait in enumerate(faits):
         col1, col2 = st.columns([4, 1])
         col1.info(fait)
@@ -47,7 +45,7 @@ with st.sidebar:
             doc_ref.update({"faits": faits})
             st.rerun()
 
-# --- CHAT ---
+# --- INTERFACE DE CHAT ---
 st.title("⚡ DELTA OS")
 
 for m in st.session_state.messages:
@@ -58,12 +56,25 @@ if p := st.chat_input("Quels sont vos ordres, Monsieur ?"):
     with st.chat_message("user"): st.markdown(p)
 
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA, le majordome de Monsieur Boran. Voici tes archives : {faits}. Sois efficace et utilise des émojis."
+        # --- 🛡️ INSTRUCTIONS D'IDENTITÉ RENFORCÉES ---
+        instr = (
+            "Tu es DELTA, le majordome virtuel de Monsieur Boran. "
+            "IMPORTANT : Tu ne dois JAMAIS te faire passer pour Monsieur Boran. "
+            "Tu es une IA, il est ton maître. Réponds avec respect et efficacité. "
+            f"Voici tes archives actuelles sur lui : {faits}. "
+            "Utilise des émojis et sois bref."
+        )
+        
         try:
+            # On force le rôle "system" pour bien séparer l'IA de l'utilisateur
+            messages_pour_ia = [{"role": "system", "content": instr}] + st.session_state.messages
+            
             r = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": instr}] + st.session_state.messages
+                messages=messages_pour_ia,
+                temperature=0.6 # Température légèrement baissée pour plus de cohérence
             )
+            
             rep = r.choices[0].message.content
             st.markdown(rep)
             st.session_state.messages.append({"role": "assistant", "content": rep})
