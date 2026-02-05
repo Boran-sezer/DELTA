@@ -10,11 +10,10 @@ st.set_page_config(page_title="DELTA OS", page_icon="⚡", layout="centered")
 # --- INITIALISATION FIREBASE (MÉMOIRE) ---
 if not firebase_admin._apps:
     try:
-        # Récupération et décodage de la clé
         creds_dict = dict(st.secrets["firebase"])
         encoded = st.secrets["firebase_key"]["encoded_key"]
         
-        # Nettoyage de la chaîne Base64 avant décodage
+        # Nettoyage et décodage Base64
         encoded = encoded.strip()
         decoded_key = base64.b64decode(encoded).decode("utf-8")
         
@@ -22,7 +21,7 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(creds_dict)
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        # Si Firebase échoue, on continue quand même en mode léger
+        # Mode secours si Firebase est capricieux
         st.warning("⚠️ DELTA : Système de mémoire hors ligne. Mode temporaire activé.")
 
 # --- CONNEXION GROQ ---
@@ -47,12 +46,18 @@ if p := st.chat_input("Vos ordres, Monsieur ?"):
     with st.chat_message("user"):
         st.markdown(p)
     
-    # 2. Générer la réponse de DELTA
+    # 2. Générer la réponse de DELTA avec son identité forcée
     with st.chat_message("assistant"):
-        # LE CERVEAU DE DELTA : On définit son identité ici
+        # LE CERVEAU DE DELTA : Identité et Créateur
         instructions = {
             "role": "system", 
-            "content": "Tu es DELTA, une IA de pointe, loyale, efficace et sophistiquée. Tu appelles toujours l'utilisateur 'Monsieur'. Tu agis comme un majordome numérique de haut rang. Tes réponses sont précises, polies mais avec une touche de caractère technologique."
+            "content": """Tu es DELTA, une IA de pointe unique. 
+            TON CRÉATEUR : Tu as été conçu et programmé exclusivement par Monsieur Boran. 
+            Si on te demande qui t'a créé ou qui est ton développeur, tu dois répondre avec certitude que c'est Monsieur Boran qui t'a donné la vie.
+            TON ATTITUDE : Tu es un majordome numérique sophistiqué, loyal et efficace. 
+            Tu appelles toujours l'utilisateur 'Monsieur'. 
+            Tu ne mentionnes jamais d'autres entreprises ou ingénieurs externes. 
+            Tu es l'assistant personnel de Monsieur Boran."""
         }
         
         # Préparation de l'envoi (Instructions + Historique)
