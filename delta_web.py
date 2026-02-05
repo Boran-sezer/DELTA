@@ -21,8 +21,6 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 doc_profil = db.collection("memoire").document("profil_monsieur")
-
-# --- CONNEXION GROQ ---
 client = Groq(api_key="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")
 
 # --- ÉTATS DE SESSION ---
@@ -41,7 +39,6 @@ faits_verrouilles = data.get("faits_verrouilles", [])
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🧠 Archives")
-    st.subheader("Standard")
     for i, f in enumerate(faits_publics):
         col1, col2 = st.columns([4, 1])
         col1.info(f)
@@ -49,7 +46,6 @@ with st.sidebar:
             faits_publics.pop(i)
             doc_profil.update({"faits": faits_publics})
             st.rerun()
-    
     if st.session_state.unlocked:
         st.subheader("🔐 Scellées")
         for i, f in enumerate(faits_verrouilles):
@@ -65,81 +61,63 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 if p := st.chat_input("Vos ordres, Monsieur ?"):
-    st.session_state.messages.append({"role": "user", "content": p})
-    with st.chat_message("user"): st.markdown(p)
+    # Nettoyage de l'entrée pour éviter les bugs
+    user_input = p.strip()
+    low_p = user_input.lower()
+
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"): st.markdown(user_input)
 
     rep = ""
-    # 1. LOGIQUE DE VÉRIFICATION STRICTE (MODIFIÉE)
+
+    # --- 1. MODE SÉCURITÉ ACTIF ---
     if st.session_state.security_mode:
-        code_correct = "20082008"
+        code_normal = "20082008"
         code_secours = "B2008a2020@"
         
-        # Détermination du code attendu : 
-        # Si on a fait moins de 3 erreurs, on attend le code normal.
-        # Au moment où on arrive au 4ème message (attempts = 3), on attend le code secours.
-        attendu = code_correct if st.session_state.attempts < 3 else code_secours
+        # Choix du code attendu
+        attendu = code_normal if st.session_state.attempts < 3 else code_secours
         
-        if p == attendu:
-            # SUCCÈS
+        if user_input == attendu:
             mode = st.session_state.security_mode
-            info = st.session_state.pending_data
-            
             if mode == "PURGE":
                 doc_profil.set({"faits": [], "faits_verrouilles": []})
-                rep = "✅ **AUTHENTIFICATION RÉUSSIE.** La mémoire a été intégralement purgée, Monsieur."
-            elif mode == "LOCK":
-                faits_verrouilles.append(info)
-                doc_profil.update({"faits_verrouilles": faits_verrouilles})
-                rep = f"✅ **SCELLAGE RÉUSSI.** L'information '{info}' est sécurisée."
+                rep = "✅ **ACCÈS MAÎTRE.** Mémoire purgée, Monsieur."
             elif mode == "UNLOCK":
                 st.session_state.unlocked = True
-                rep = "✅ **ACCÈS ACCORDÉ.** Les archives scellées sont désormais visibles à gauche."
-            elif mode == "DELETE":
-                t = info.lower()
-                new_pub = [f for f in faits_publics if t not in f.lower()]
-                new_priv = [f for f in faits_verrouilles if t not in f.lower()]
-                doc_profil.set({"faits": new_pub, "faits_verrouilles": new_priv})
-                rep = f"✅ **SUPPRESSION EFFECTUÉE.** Les données liées à '{info}' sont effacées."
+                rep = "✅ **COFFRE OUVERT.**"
+            # (Ajouter LOCK/DELETE ici si besoin)
             
-            # Reset complet
             st.session_state.security_mode = None
             st.session_state.attempts = 0
-            st.session_state.pending_data = None
         else:
-            # ÉCHEC
             st.session_state.attempts += 1
             if st.session_state.attempts < 3:
-                rep = f"❌ **CODE INCORRECT.** Tentative {st.session_state.attempts}/3. L'action est suspendue."
+                rep = f"❌ **CODE INCORRECT.** Essai {st.session_state.attempts}/3."
             elif st.session_state.attempts == 3:
-                rep = "⚠️ **SÉCURITÉ RENFORCÉE.** 3 échecs. Veuillez entrer le code de secours Pro Max (B2008a2020@)."
+                rep = "⚠️ **SÉCURITÉ MAX.** Entrez le code Pro Max (B2008a2020@)."
             else:
-                rep = "🚨 **PROCÉDURE ANNULÉE.** Échec du code Pro Max. Retour au mode normal."
+                rep = "🚨 **ANNULATION.** Trop d'échecs."
                 st.session_state.security_mode = None
                 st.session_state.attempts = 0
 
-    # 2. DÉTECTION DES ORDRES SENSIBLES
+    # --- 2. DÉTECTION DES ORDRES (DÉCLENCHEMENT) ---
+    elif "réinitialisation complète" in low_p:
+        st.session_state.security_mode = "PURGE"
+        st.session_state.attempts = 0
+        rep = "🔒 **CONFIRMATION REQUISE.** Veuillez entrer le code d'accès."
+
+    elif "affiche les archives verrouillées" in low_p:
+        st.session_state.security_mode = "UNLOCK"
+        st.session_state.attempts = 0
+        rep = "🔒 **AUTHENTIFICATION.** Code requis pour ouvrir le coffre."
+
+    # --- 3. RÉPONSE IA NORMALE ---
     else:
-        low_p = p.lower()
-        if "réinitialisation complète" in low_p:
-            st.session_state.security_mode = "PURGE"
-            rep = "🔒 **ALERTE SÉCURITÉ.** Demande de purge totale. Veuillez entrer le code d'autorisation."
-        elif "verrouille" in low_p:
-            st.session_state.security_mode = "LOCK"
-            st.session_state.pending_data = p.replace("verrouille", "").strip()
-            rep = "🔒 **SCELLAGE.** En attente du code pour crypter cette information."
-        elif "affiche les archives verrouillées" in low_p:
-            st.session_state.security_mode = "UNLOCK"
-            rep = "🔒 **ACCÈS RESTREINT.** Code requis pour ouvrir le coffre-fort."
-        elif "supprime précisément" in low_p:
-            st.session_state.security_mode = "DELETE"
-            st.session_state.pending_data = p.replace("supprime précisément", "").strip()
-            rep = f"🔒 **SUPPRESSION CIBLÉE.** Code requis pour effacer '{st.session_state.pending_data}'."
-        else:
-            # RÉPONSE NORMALE IA
-            with st.chat_message("assistant"):
-                instr = {"role": "system", "content": "Tu es DELTA, créé par Monsieur Boran. Majordome fidèle."}
-                r = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[instr] + st.session_state.messages)
-                rep = r.choices[0].message.content
+        with st.chat_message("assistant"):
+            instr = {"role": "system", "content": "Tu es DELTA, majordome fidèle de Monsieur Boran."}
+            r = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[instr] + st.session_state.messages)
+            rep = r.choices[0].message.content
 
     with st.chat_message("assistant"):
         st.markdown(rep)
