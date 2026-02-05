@@ -5,10 +5,35 @@ from firebase_admin import credentials, firestore
 import base64
 import json
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (DÉFINITIVE) ---
 st.set_page_config(page_title="DELTA OS", page_icon="⚡", layout="wide")
 
-# --- INITIALISATION FIREBASE ---
+# --- ÉTATS DE SESSION ---
+if "messages" not in st.session_state: st.session_state.messages = []
+if "locked" not in st.session_state: st.session_state.locked = False
+
+# --- 🔒 LOGIQUE DE VÉRROUILLAGE PRIORITAIRE ---
+if st.session_state.locked:
+    # On vide l'écran visuellement
+    st.empty() 
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    st.title("🔒 SYSTÈME VERROUILLÉ")
+    st.subheader("Protocole de sécurité DELTA activé.")
+    
+    code_input = st.text_input("Veuillez entrer le code Maître :", type="password")
+    
+    if st.button("DÉVERROUILLER"):
+        if code_input == "20082008":
+            st.session_state.locked = False
+            st.success("✅ Code correct. Restauration du système...")
+            st.rerun()
+        else:
+            st.error("❌ Accès refusé.")
+    
+    # On utilise st.stop() pour être SÛR que rien d'autre ne s'affiche en dessous
+    st.stop() 
+
+# --- INITIALISATION FIREBASE & GROQ (Seulement si déverrouillé) ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -21,47 +46,22 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- ÉTATS DE SESSION ---
-if "messages" not in st.session_state: st.session_state.messages = []
-if "locked" not in st.session_state: st.session_state.locked = False
-
-# --- 🔒 MODE VERROUILLAGE (BLOCAGE TOTAL) ---
-if st.session_state.locked:
-    st.markdown("# 🔒 SYSTÈME SÉCURISÉ")
-    st.write("DELTA est en mode veille sécurisée.")
-    
-    code_input = st.text_input("Code d'accès :", type="password", key="lock_input")
-    
-    if st.button("DÉVERROUILLER"):
-        if code_input == "20082008":
-            st.session_state.locked = False
-            st.success("Accès rétabli.")
-            st.rerun()
-        else:
-            st.error("Code erroné.")
-    st.stop() 
-
-# --- CHARGEMENT DES ARCHIVES ---
+# --- GESTION DES ARCHIVES ---
 res = doc_ref.get()
-data = res.to_dict() if res.exists else {"faits": []}
-faits = data.get("faits", [])
+faits = res.to_dict().get("faits", []) if res.exists else []
 
-# --- SIDEBAR (GESTION MANUELLE) ---
 with st.sidebar:
     st.title("🧠 Archives")
-    if not faits:
-        st.write("Mémoire vide.")
-    
-    # Option pour supprimer manuellement
+    if st.button("🗑️ TOUT EFFACER"):
+        doc_ref.update({"faits": []})
+        st.rerun()
+    st.write("---")
     for i, fait in enumerate(faits):
         col1, col2 = st.columns([4, 1])
         col1.info(fait)
         if col2.button("🗑️", key=f"del_{i}"):
-            # On retire l'élément de la liste
             faits.pop(i)
-            # On met à jour Firebase
             doc_ref.update({"faits": faits})
-            # On relance pour mettre à jour l'affichage
             st.rerun()
 
 # --- INTERFACE DE CHAT ---
@@ -73,17 +73,16 @@ for m in st.session_state.messages:
 if p := st.chat_input("Vos ordres, Monsieur ?"):
     low_p = p.lower().strip()
     
-    # Détection Verrouillage
-    if "verrouille-toi" in low_p:
+    # Commande de verrouillage
+    if "verrouille-toi" in low_p or "lock" in low_p:
         st.session_state.locked = True
         st.rerun()
 
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"): st.markdown(p)
 
-    # Réponse IA
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA. Voici tes archives : {faits}. Sois bref et utilise des émojis."
+        instr = f"Tu es DELTA. Archives : {faits}"
         r = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": instr}] + st.session_state.messages
