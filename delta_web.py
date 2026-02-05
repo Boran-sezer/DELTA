@@ -53,29 +53,28 @@ for m in st.session_state.messages:
 if p := st.chat_input("Vos ordres, Monsieur ?"):
     low_p = p.lower().strip()
     
-    # 🛠️ AUTO-DÉTECTION DE L'ARCHIVAGE (Plus flexible)
+    # 🛠️ LOGIQUE D'ARCHIVAGE INTELLIGENTE
     keywords = ["archive", "mémorise", "enregistre", "souviens-toi"]
-    if any(word in low_p for word in keywords):
-        # On extrait l'info (on enlève le mot clé s'il est au début)
+    # On n'archive QUE si un mot-clé est présent ET que "supprime/efface" n'est PAS là
+    if any(word in low_p for word in keywords) and not any(anti in low_p for anti in ["supprime", "efface", "vire"]):
         info = p
         for word in keywords: info = info.replace(word, "").replace(":", "").strip()
         
         if info:
             faits.append(info)
             doc_ref.update({"faits": faits})
-            st.toast(f"Mémoire mise à jour : {info}") # Petit message discret en bas
+            st.toast(f"Mémoire mise à jour : {info}")
 
     st.session_state.messages.append({"role": "user", "content": p})
     with st.chat_message("user"): st.markdown(p)
 
     with st.chat_message("assistant"):
-        # --- 🛡️ INSTRUCTION ANTI-AMNÉSIE ---
         instr = (
             "Tu es DELTA, le majordome de Monsieur Boran. "
-            "TU AS LA CAPACITÉ DE STOCKER DES DONNÉES via ta base de données Firebase. "
-            f"Voici tes archives actuelles : {faits}. "
-            "Si Monsieur te demande de retenir quelque chose, confirme-lui que c'est fait et que c'est stocké dans tes archives. "
-            "Ne dis JAMAIS que tu ne peux pas mémoriser. Sois bref et efficace."
+            "TU AS LA CAPACITÉ DE STOCKER DES DONNÉES via Firebase. "
+            f"Archives actuelles : {faits}. "
+            "Si Monsieur veut supprimer une archive, dis-lui d'utiliser les boutons 🗑️ dans la barre latérale. "
+            "Ne dis JAMAIS que tu ne peux pas mémoriser. Sois bref."
         )
         
         r = client.chat.completions.create(
@@ -86,6 +85,6 @@ if p := st.chat_input("Vos ordres, Monsieur ?"):
         st.markdown(rep)
         st.session_state.messages.append({"role": "assistant", "content": rep})
         
-        # On force un rerun si une info a été ajoutée pour l'afficher dans la sidebar
-        if any(word in low_p for word in keywords):
+        # Rerun seulement si on a archivé quelque chose
+        if any(word in low_p for word in keywords) and not any(anti in low_p for anti in ["supprime", "efface"]):
             st.rerun()
