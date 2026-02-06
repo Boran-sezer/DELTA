@@ -20,27 +20,14 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. RECUPÉRATION DES ARCHIVES ---
+# --- 2. RECUPÉRATION DES DONNÉES ---
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
-# --- 3. INTERFACE ÉPURÉE (SANS SIDEBAR) ---
+# --- 3. INTERFACE MINIMALISTE ---
 st.set_page_config(page_title="DELTA AI", layout="wide")
 st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
-
-# Archives intégrées dans la page principale au lieu de la barre latérale
-with st.expander("📁 ACCÉDER AUX ARCHIVES MÉMOIRE"):
-    if archives:
-        cols = st.columns(len(archives) if len(archives) > 0 else 1)
-        for idx, (cat, items) in enumerate(archives.items()):
-            with cols[idx % len(cols)]:
-                st.markdown(f"**{cat}**")
-                for i in items:
-                    st.write(f"• {i}")
-    else:
-        st.info("Aucune donnée mémorisée.")
-
-st.divider()
+# Suppression de toute barre latérale ou expander d'archives ici
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -48,21 +35,21 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. ANALYSE ET FILTRAGE AUTO ---
-if prompt := st.chat_input("Ordres pour DELTA..."):
+# --- 4. ANALYSE ET ARCHIVAGE DISCRET ---
+if prompt := st.chat_input("Message pour DELTA..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
     sys_analyse = (
         f"Archives : {archives}. "
-        "Analyseur DELTA. Ne garde que le crucial. "
+        "Analyseur DELTA. Archive uniquement les faits cruciaux. "
         "Réponds UNIQUEMENT en JSON : {'action':'add', 'cat':'NOM', 'val':'INFO'} ou {'action':'none'}"
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Archiviste minimaliste."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Archiviste invisible."}, {"role": "user", "content": sys_analyse}],
             temperature=0
         )
         match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
@@ -74,17 +61,17 @@ if prompt := st.chat_input("Ordres pour DELTA..."):
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
                     doc_ref.set({"archives": archives})
-                    st.toast("💾 Système mis à jour.")
-                    time.sleep(0.3)
-                    st.rerun()
+                    # On ne met qu'un petit toast discret pour confirmer l'action
+                    st.toast("💾")
+                    time.sleep(0.2)
     except: pass
 
-    # --- 5. RÉPONSE CONCISE ---
+    # --- 5. RÉPONSE ---
     with st.chat_message("assistant"):
         instruction_delta = (
             f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
-            f"Données : {archives}. "
-            "DIRECTIVES : Sois extrêmement concis. Pas de bavardage. Ton technique."
+            f"Tu as accès à ces données en mémoire : {archives}. "
+            "Sois extrêmement concis et efficace. Pas de blabla inutile."
         )
         try:
             resp = client.chat.completions.create(
