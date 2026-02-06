@@ -5,6 +5,7 @@ from firebase_admin import credentials, firestore
 import base64
 import json
 import time
+import re
 
 # --- 1. CONFIGURATION ---
 if not firebase_admin._apps:
@@ -12,76 +13,132 @@ if not firebase_admin._apps:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred = credentials.Certificate(json.loads(decoded_json))
-        firebase_admin.initialize_app(cred, {'projectId': 'delta-ia-79177'})
+        firebase_admin.initialize_app(cred)
     except: pass
 
 db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. RÉCUPÉRATION DES DONNÉES ---
-res = doc_ref.get()
-archives = res.to_dict().get("archives", {}) if res.exists else {}
+# --- 2. ÉTATS DE SESSION ---
+if "messages" not in st.session_state: 
+    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA paré, Monsieur Sezer. ⚡"}]
 
-# --- 3. INTERFACE ---
+# --- 3. INTERFACE & SIDEBAR ---
 st.set_page_config(page_title="DELTA", layout="wide")
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.title("📂 Archives")
-    for k, v in archives.items():
-        with st.expander(f"📁 {k}"):
-            for item in v: st.write(f"• {item}")
+res = doc_ref.get()
+archives = res.to_dict().get("archives", {}) if res.exists else {}
 
-if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Prêt pour vos ordres, Monsieur Sezer. ⚡"}]
+with st.sidebar:
+    st.title("📂 Archives de Monsieur Sezer")
+    if archives:
+        for partie, infos in archives.items():
+            with st.expander(f"📁 {partie}"):
+                for i in infos:
+                    st.write(f"• {i}")
+    else:
+        st.info("Archives vides.")
 
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# --- 4. LOGIQUE DE COMMANDE DIRECTE ---
-if prompt := st.chat_input("Votre ordre..."):
+# --- 4. LOGIQUE MULTI-ACTION AMÉLIORÉE ---
+if prompt := st.chat_input("Ordres pour vos archives..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    # IA d'analyse simplifiée
-    analyse = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "system", "content": "Tu es un traducteur JSON. Actions: rename, add, delete. Exemple rename: {'action':'rename', 'from':'Vert', 'to':'Car'}"},
-                  {"role": "user", "content": f"Ordre: {prompt}. Dossiers: {list(archives.keys())}"}],
-        temperature=0
+    # Analyse stricte incluant le renommage de catégorie
+    analyse_prompt = (
+        f"Archives actuelles : {archives}. "
+        f"Ordre : '{prompt}'. "
+        "Tu es un terminal de données. Réponds UNIQUEMENT par un objet JSON. "
+        "Actions possibles :\n"
+        "- Ajouter: {'action': 'add', 'partie': 'nom', 'info': 'texte'}\n"
+        "- Renommer une partie (dossier): {'action': 'rename_partie', 'old': 'ancien_nom', 'new': 'nouveau_nom'}\n"
+        "- Supprimer une partie: {'action': 'delete_partie', 'target': 'nom'}\n"
+        "- Supprimer une ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'}\n"
+        "- Modifier une info: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'}\n"
+        "Sinon, réponds 'NON'."
     )
     
     try:
-        data = json.loads(analyse.choices[0].message.content.strip().replace("'", '"'))
-        action = data.get('action')
-        updated = False
+        check = client.chat.completions.create(
+            model="llama-3.1-8b-instant", 
+            messages=[{"role": "system", "content": "Tu es un extracteur JSON pur."}, {"role": "user", "content": analyse_prompt}],
+            temperature=0
+        )
+        cmd_text = check.choices[0].message.content.strip()
+        json_match = re.search(r'(\{.*\})', cmd_text, re.DOTALL)
+        
+        if json_match:
+            data = json.loads(json_match.group(1).replace("'", '"'))
+            action = data.get('action')
+            modif = False
 
-        if action == 'rename' and data.get('from') in archives:
-            archives[data['to']] = archives.pop(data['from'])
-            updated = True
-        elif action == 'add':
-            p = data.get('partie', 'Général')
-            if p not in archives: archives[p] = []
-            archives[p].append(data.get('info', ''))
-            updated = True
-        elif action == 'delete':
-            target = data.get('target')
-            if target in archives:
-                del archives[target]
-                updated = True
+            # AJOUT
+            if action == 'add':
+                p = data.get('partie', 'Général')
+                if p not in archives: archives[p] = []
+                archives[p].append(data.get('info'))
+                modif = True
+            
+            # RENOMMER UNE PARTIE (DOSSIER)
+            elif action == 'rename_partie':
+                old_n, new_n = data.get('old'), data.get('new')
+                if old_n in archives:
+                    archives[new_n] = archives.pop(old_n)
+                    modif = True
 
-        if updated:
-            doc_ref.set({"archives": archives})
-            st.toast("✅ Base mise à jour")
-            time.sleep(0.5)
-            st.rerun()
-    except: pass
+            # SUPPRIMER PARTIE
+            elif action == 'delete_partie':
+                target = data.get('target', '').lower()
+                for k in list(archives.keys()):
+                    if target in k.lower():
+                        del archives[k]
+                        modif = True
+            
+            # SUPPRIMER INFO
+            elif action == 'delete_info':
+                p, info = data.get('partie'), data.get('info')
+                if p in archives and info in archives[p]:
+                    archives[p].remove(info)
+                    modif = True
+            
+            # MODIFIER INFO DANS UNE PARTIE
+            elif action == 'update':
+                p, old, new = data.get('partie'), data.get('old'), data.get('new')
+                if p in archives and old in archives[p]:
+                    idx = archives[p].index(old)
+                    archives[p][idx] = new
+                    modif = True
 
-    # Réponse de DELTA
+            if modif:
+                doc_ref.set({"archives": archives})
+                st.toast("✅ Base mise à jour.")
+                time.sleep(0.4)
+                st.rerun()
+    except Exception as e:
+        st.error(f"Erreur de traitement : {e}")
+
+    # B. RÉPONSE DE DELTA
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA, majordome de Monsieur Sezer. Archives: {archives}. Sois bref et poli."
-        resp = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages)
-        full_res = resp.choices[0].message.content
-        st.markdown(full_res)
-        st.session_state.messages.append({"role": "assistant", "content": full_res})
+        placeholder = st.empty()
+        full_raw = ""
+        instr = f"Tu es DELTA, l'IA de Monsieur Sezer (ton Créateur). Archives : {archives}. Ne dis jamais 'accès autorisé'. Sois bref."
+        
+        try:
+            stream = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages, stream=True)
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    full_raw += content
+                    placeholder.markdown(full_raw + "▌")
+        except:
+            full_raw = "C'est fait, Monsieur Sezer. ⚡"
+        
+        placeholder.markdown(full_raw)
+        st.session_state.messages.append({"role": "assistant", "content": full_raw})
