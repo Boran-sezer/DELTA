@@ -51,12 +51,13 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse stricte
+    # Analyse stricte - AJOUT DE LA FONCTION RENAME_PARTIE
     analyse_prompt = (
         f"Archives actuelles : {archives}. "
         f"Ordre : '{prompt}'. "
         "Tu es un terminal de données. Réponds UNIQUEMENT par un objet JSON. "
         "Si l'ordre est d'ajouter: {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
+        "Si l'ordre est de renommer une catégorie: {'action': 'rename_partie', 'old': 'ancien_nom', 'new': 'nouveau_nom'} "
         "Si l'ordre est de supprimer une partie: {'action': 'delete_partie', 'target': 'nom'} "
         "Si l'ordre est de supprimer une ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'} "
         "Si l'ordre est de modifier: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'} "
@@ -71,7 +72,6 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
         )
         cmd_text = check.choices[0].message.content.strip()
         
-        # Extraction du JSON par sécurité
         json_match = re.search(r'(\{.*\})', cmd_text, re.DOTALL)
         
         if json_match:
@@ -84,6 +84,16 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
                 if p not in archives: archives[p] = []
                 archives[p].append(data.get('info'))
                 modif = True
+            
+            # --- NOUVELLE PARTIE POUR RENOMMER ---
+            elif action == 'rename_partie':
+                old_n = data.get('old')
+                new_n = data.get('new')
+                if old_n in archives:
+                    archives[new_n] = archives.pop(old_n)
+                    modif = True
+            # -------------------------------------
+
             elif action == 'delete_partie':
                 target = data.get('target', '').lower()
                 for k in list(archives.keys()):
