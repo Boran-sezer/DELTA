@@ -34,21 +34,18 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. ANALYSE ET ARCHIVAGE DISCRET ---
+# --- 4. ANALYSE ET ARCHIVAGE ---
 if prompt := st.chat_input("Message pour DELTA..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    sys_analyse = (
-        f"Archives : {archives}. "
-        "Analyseur DELTA. Archive uniquement les faits cruciaux. "
-        "Réponds UNIQUEMENT en JSON : {'action':'add', 'cat':'NOM', 'val':'INFO'} ou {'action':'none'}"
-    )
-    
+    sys_analyse = (f"Archives : {archives}. "
+                   "Archive uniquement les faits cruciaux. "
+                   "JSON : {'action':'add', 'cat':'NOM', 'val':'INFO'} ou {'action':'none'}")
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Archiviste invisible."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Archiviste."}, {"role": "user", "content": sys_analyse}],
             temperature=0
         )
         match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
@@ -61,26 +58,36 @@ if prompt := st.chat_input("Message pour DELTA..."):
                     archives[c].append(v)
                     doc_ref.set({"archives": archives})
                     st.toast("💾")
-                    time.sleep(0.2)
     except: pass
 
-    # --- 5. RÉPONSE ---
+    # --- 5. RÉPONSE AVEC EFFET DE FRAPPE (STREAMING) ---
     with st.chat_message("assistant"):
         instruction_delta = (
             f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
-            f"Mémoire : {archives}. "
-            "Sois extrêmement concis. Pas de blabla inutile."
+            f"Mémoire : {archives}. Sois extrêmement concis."
         )
+        
+        placeholder = st.empty()
+        full_response = ""
+        
         try:
-            resp = client.chat.completions.create(
+            # Activation du stream=True
+            stream = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
                 messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
-                temperature=0.3
+                temperature=0.3,
+                stream=True
             )
-            final = resp.choices[0].message.content
-        except:
-            resp = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages)
-            final = resp.choices[0].message.content
-        
-        st.markdown(final)
-        st.session_state.messages.append({"role": "assistant", "content": final})
+            
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+                    placeholder.markdown(full_response + "▌") # Petit curseur visuel
+            
+            placeholder.markdown(full_response) # Texte final propre
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
+        except Exception:
+            error_msg = "Système opérationnel, Monsieur Sezer."
+            placeholder.markdown(error_msg)
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})
