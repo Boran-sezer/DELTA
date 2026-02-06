@@ -40,12 +40,11 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. LE MOTEUR DE TRAITEMENT (SIMPLIFIÉ AU MAXIMUM) ---
+# --- 4. LE MOTEUR DE TRAITEMENT (SÉCURISÉ) ---
 if prompt := st.chat_input("Ordre direct..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Analyse ultra-courte pour éviter les erreurs de l'IA
     sys_prompt = (
         "Réponds UNIQUEMENT en JSON. "
         "Si AJOUTER info: {'action':'add', 'cat':'nom_cat', 'val':'texte'}. "
@@ -55,15 +54,12 @@ if prompt := st.chat_input("Ordre direct..."):
     )
     
     try:
-        # On utilise le modèle 8b pour la rapidité et la précision JSON
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
             temperature=0
         )
         raw_json = check.choices[0].message.content.strip()
-        
-        # Nettoyage automatique du JSON
         match = re.search(r'\{.*\}', raw_json, re.DOTALL)
         if match:
             data = json.loads(match.group(0).replace("'", '"'))
@@ -75,13 +71,11 @@ if prompt := st.chat_input("Ordre direct..."):
                 if cat not in archives: archives[cat] = []
                 archives[cat].append(data.get('val', ''))
                 done = True
-            
             elif action == 'rename':
                 o, n = data.get('old'), data.get('new')
                 if o in archives:
                     archives[n] = archives.pop(o)
                     done = True
-            
             elif action == 'del':
                 c = data.get('cat')
                 if c in archives:
@@ -95,13 +89,27 @@ if prompt := st.chat_input("Ordre direct..."):
                 st.rerun()
     except: pass
 
-    # RÉPONSE FINALE
+    # --- 5. RÉPONSE FINALE AVEC SÉCURITÉ RATE LIMIT ---
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives: {archives}. Sois bref."
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": instr}] + st.session_state.messages
-        )
-        final_txt = resp.choices[0].message.content
+        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives: {archives}. Sois bref et n'utilise jamais 'accès autorisé'."
+        
+        try:
+            # Tentative avec le gros modèle
+            resp = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": instr}] + st.session_state.messages
+            )
+            final_txt = resp.choices[0].message.content
+        except Exception as e:
+            # Si erreur de quota (RateLimit), on utilise le petit modèle de secours
+            if "rate_limit" in str(e).lower():
+                resp = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[{"role": "system", "content": instr}] + st.session_state.messages
+                )
+                final_txt = resp.choices[0].message.content
+            else:
+                final_txt = "Erreur système critique, Monsieur Sezer. Veuillez vérifier les logs."
+
         st.markdown(final_txt)
         st.session_state.messages.append({"role": "assistant", "content": final_txt})
