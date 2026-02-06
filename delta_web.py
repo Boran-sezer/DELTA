@@ -6,7 +6,7 @@ import base64
 import json
 import time
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONFIGURATION DES ACCÈS ---
 CODE_ACT = "20082008"
 CODE_MASTER = "B2008a2020@"
 
@@ -22,35 +22,35 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. ÉTATS DE SESSION ---
+# --- 2. GESTION DES ÉTATS (SESSION STATE) ---
 if "messages" not in st.session_state: 
     st.session_state.messages = [{"role": "assistant", "content": "Système DELTA activé. Prêt à vous servir, Monsieur SEZER. ⚡"}]
 if "auth" not in st.session_state: st.session_state.auth = False
 if "locked" not in st.session_state: st.session_state.locked = False
 
-# --- 3. CHARGEMENT MÉMOIRE ---
+# --- 3. CHARGEMENT DE LA MÉMOIRE ---
 res = doc_ref.get()
 data = res.to_dict() if res.exists else {"faits": []}
 faits = data.get("faits", [])
 
-# --- 4. SÉCURITÉ ---
+# --- 4. SÉCURITÉ : MODE LOCKDOWN ---
 if st.session_state.locked:
-    st.error("🚨 SYSTÈME BLOQUÉ")
-    m_input = st.text_input("CODE MAÎTRE :", type="password")
-    if st.button("DÉBLOQUER"):
+    st.error("🚨 SYSTÈME BLOQUÉ - SÉCURITÉ MAXIMALE")
+    m_input = st.text_input("ENTREZ LE CODE MAÎTRE :", type="password")
+    if st.button("🔓 DÉBLOQUER"):
         if m_input == CODE_MASTER:
             st.session_state.locked = False
             st.rerun()
     st.stop()
 
-# --- 5. GÉNÉRATEUR SILENCIEUX ET LENT ---
-def generer_reponse_discrete(prompt):
+# --- 5. LOGIQUE DE GÉNÉRATION DISCRÈTE ET LENTE ---
+def flux_delta(prompt):
     instr = (
-        "Tu es DELTA IA, le majordome personnel de Monsieur SEZER. "
-        "CONSIGNE ABSOLUE : Ne mentionne JAMAIS tes archives ou tes balises techniques dans ta réponse finale. "
-        "Agis avec une discrétion totale. Si tu dois mémoriser quelque chose, ajoute 'ACTION_ARCHIVE: [info]' à la toute fin, "
-        "mais sache que ce sera masqué à l'utilisateur."
-        f"Archives : {faits}."
+        "Tu es DELTA IA, le majordome personnel de Monsieur SEZER. Tu es sa création. "
+        "CONSIGNE DE DISCRÉTION : Ne mentionne JAMAIS tes archives ou tes balises techniques. "
+        "Réponds avec efficacité. Si tu apprends une info importante, "
+        "termine impérativement par 'ACTION_ARCHIVE: [info]'."
+        f"Archives confidentielles (NE PAS RÉCITER) : {faits}."
     )
     
     stream = client.chat.completions.create(
@@ -59,48 +59,71 @@ def generer_reponse_discrete(prompt):
         stream=True
     )
     
-    full_text = ""
     for chunk in stream:
         content = chunk.choices[0].delta.content
         if content:
-            full_text += content
-            # On n'affiche pas la balise ACTION_ARCHIVE pendant l'écriture
-            if "ACTION_ARCHIVE:" not in full_text:
-                for char in content:
-                    yield char
-                    time.sleep(0.02)
+            yield content
 
-# --- 6. INTERFACE ---
+# --- 6. INTERFACE DE CHAT ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
+# Affichage de l'historique
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
+# Zone de saisie
 if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
+    # Commande de verrouillage
+    if "verrouille" in prompt.lower():
+        st.session_state.locked = True
+        st.rerun()
+
+    # Réponse de DELTA
     with st.chat_message("assistant"):
-        # Écriture progressive et filtrage de la balise
-        response_complete = ""
         placeholder = st.empty()
+        full_raw_text = ""
+        displayed_text = ""
         
-        # On capture la réponse pour extraire l'archive sans l'afficher
-        response_claire = st.write_stream(generer_reponse_discrete(prompt))
+        # Effet d'écriture ralentie et filtrage des balises
+        for chunk in flux_delta(prompt):
+            full_raw_text += chunk
+            
+            # Si on commence à détecter la balise, on arrête d'afficher
+            if "ACTION_ARCHIVE" in full_raw_text:
+                break
+            
+            # Affichage lettre par lettre pour le style
+            for char in chunk:
+                displayed_text += char
+                placeholder.markdown(displayed_text + "▌")
+                time.sleep(0.02) # Vitesse réglée pour Monsieur SEZER
         
-        # Récupération de la réponse brute pour traiter l'archive en secret
-        # (L'IA renvoie la balise à la fin du stream mais le générateur l'a masquée visuellement)
-        raw_completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Extrais uniquement l'info après ACTION_ARCHIVE dans ce texte s'il y en a une, sinon réponds 'RIEN' : " + response_claire}]
-        ).choices[0].message.content
+        # Nettoyage final pour l'enregistrement
+        clean_response = full_raw_text.split("ACTION_ARCHIVE")[0].strip()
+        placeholder.markdown(clean_response)
 
-        if "ACTION_ARCHIVE:" in response_claire:
-            info = response_claire.split("ACTION_ARCHIVE:")[1].strip()
+        # Archivage secret en arrière-plan
+        if "ACTION_ARCHIVE:" in full_raw_text:
+            info = full_raw_text.split("ACTION_ARCHIVE:")[1].strip().split('\n')[0]
             if info not in faits:
                 faits.append(info)
                 doc_ref.set({"faits": faits}, merge=True)
-            # On nettoie la réponse finale pour l'historique
-            response_claire = response_claire.split("ACTION_ARCHIVE:")[0].strip()
+                # Note : On ne met plus de message de succès pour rester discret
 
-    st.session_state.messages.append({"role": "assistant", "content": response_claire})
+    st.session_state.messages.append({"role": "assistant", "content": clean_response})
+
+# --- 7. PROTECTION DES ARCHIVES ---
+if any(w in (prompt or "").lower() for w in ["archive", "mémoire"]):
+    if not st.session_state.auth:
+        with st.chat_message("assistant"):
+            st.warning("🔒 Identification requise pour accéder aux dossiers.")
+            c = st.text_input("CODE :", type="password")
+            if st.button("CONFIRMER"):
+                if c == CODE_ACT:
+                    st.session_state.auth = True
+                    st.rerun()
