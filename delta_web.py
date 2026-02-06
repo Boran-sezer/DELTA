@@ -26,16 +26,16 @@ archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
 st.set_page_config(page_title="DELTA AI", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : Filtrage Intelligent</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : Noyau Épuré</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.title("📂 Mémoire de Monsieur Sezer")
+    st.title("📂 Mémoire")
     if archives:
         for cat, items in archives.items():
             with st.expander(f"📁 {cat}"):
                 for i in items: st.write(f"• {i}")
     else:
-        st.info("Aucune donnée pertinente mémorisée.")
+        st.info("Vide.")
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -43,58 +43,52 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. ANALYSE ET FILTRAGE INTELLIGENT ---
-if prompt := st.chat_input("Dites quelque chose à DELTA..."):
+# --- 4. ANALYSE ET FILTRAGE ULTRA-STRICT ---
+if prompt := st.chat_input("Ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Instruction de filtrage strict
     sys_analyse = (
-        f"Archives actuelles : {archives}. "
-        f"Message de Monsieur Sezer : '{prompt}'. "
-        "Tu es le filtre de mémoire de DELTA. Ton rôle est de ne garder QUE le crucial. "
-        "1. IGNORE le bavardage, les politesses, les questions simples ou les phrases sans valeur informative. "
-        "2. ARCHIVE uniquement les faits nouveaux, préférences, noms, projets ou décisions. "
-        "3. Réponds UNIQUEMENT en JSON : "
-        "{'action':'add', 'cat':'NOM_LOGIQUE', 'val':'texte_court'} "
-        "Sinon réponds {'action':'none'}"
+        f"Archives : {archives}. "
+        "Tu es l'analyseur de DELTA. Ne garde QUE l'essentiel. "
+        "Réponds UNIQUEMENT en JSON : {'action':'add', 'cat':'NOM', 'val':'INFO'} ou {'action':'none'}"
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un archiviste minimaliste et intelligent."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Archiviste minimaliste."}, {"role": "user", "content": sys_analyse}],
             temperature=0
         )
-        
         match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
         if match:
             data = json.loads(match.group(0).replace("'", '"'))
-            act = data.get('action')
-            
-            if act == 'add':
-                c, v = data.get('cat', 'Divers'), data.get('val')
-                # On ne sauvegarde que si l'info n'existe pas déjà
+            if data.get('action') == 'add':
+                c, v = data.get('cat', 'Identité'), data.get('val')
                 if v and v not in archives.get(c, []):
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
                     doc_ref.set({"archives": archives})
-                    st.toast(f"💾 Info pertinente archivée : {c}")
-                    time.sleep(0.4)
+                    st.toast("💾 Mémorisé.")
+                    time.sleep(0.3)
                     st.rerun()
     except: pass
 
-    # --- 5. RÉPONSE ---
+    # --- 5. RÉPONSE : CONCISION ET RESPECT DU CRÉATEUR ---
     with st.chat_message("assistant"):
+        # On définit ici le ton froid, efficace et respectueux
         instruction_delta = (
-            f"Tu es DELTA, créé par Monsieur Sezer. "
-            f"Archives : {archives}. "
-            "Réponds avec intelligence et respect à ton Créateur. Sois concis."
+            f"Tu es DELTA, IA de sécurité et d'assistance. Créateur : Monsieur Sezer Boran. "
+            f"Données actuelles : {archives}. "
+            "DIRECTIVES : 1. Sois extrêmement concis. 2. Pas de bavardage inutile. "
+            "3. Ne dis jamais 'probablement', tu sais qui est ton Créateur. "
+            "4. Utilise un ton technique et efficace."
         )
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
-                messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages
+                messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
+                temperature=0.3 # Plus bas pour moins de "bla-bla"
             )
             final = resp.choices[0].message.content
         except:
