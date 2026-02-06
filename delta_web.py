@@ -5,7 +5,6 @@ from firebase_admin import credentials, firestore
 import base64
 import json
 import time
-import streamlit.components.v1 as components
 
 # --- 1. CONFIGURATION ---
 CODE_ACT = "20082008"
@@ -23,15 +22,14 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. FONCTION AUTO-SCROLL ---
-def scroll_en_bas():
-    js = """
-    <script>
-        var body = window.parent.document.querySelector(".main");
-        body.scrollTop = body.scrollHeight;
-    </script>
-    """
-    components.html(js, height=0)
+# --- 2. STYLE CSS POUR FIXER LE SCROLL ---
+st.markdown("""
+    <style>
+    .stChatFloatingInputContainer {
+        padding-bottom: 20px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- 3. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
@@ -54,11 +52,15 @@ if st.session_state.locked:
 # --- 5. INTERFACE ET HISTORIQUE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+# Conteneur principal pour les messages
+chat_placeholder = st.container()
 
-# --- 6. AUTHENTIFICATION (SANS BLOQUER L'INPUT) ---
+with chat_placeholder:
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+# --- 6. AUTHENTIFICATION ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
         st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
@@ -77,51 +79,51 @@ if st.session_state.pending_auth:
                 if st.session_state.essais >= 3:
                     st.session_state.locked = True
                 st.rerun()
-    scroll_en_bas()
 
-# --- 7. BARRE D'ÉCRITURE TOUJOURS ACTIVE ---
+# --- 7. TRAITEMENT DES MESSAGES ---
 if prompt := st.chat_input("Écrivez vos ordres ici..."):
-    # Si on est en attente de code, on ignore l'input de chat pour forcer le code
     if st.session_state.pending_auth:
         st.error("Veuillez d'abord valider le code de sécurité.")
     else:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
+        with chat_placeholder:
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
         if "verrouille" in prompt.lower():
             st.session_state.locked = True
             st.rerun()
 
-        with st.chat_message("assistant"):
-            placeholder = st.empty()
-            full_raw, displayed = "", ""
-            
-            res = doc_ref.get()
-            faits = res.to_dict().get("faits", []) if res.exists else []
-            
-            instr = f"Tu es DELTA. Ne cite JAMAIS ces faits sans code : {faits}. Si accès mémoire demandé : REQUIS_CODE."
+        with chat_placeholder:
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                full_raw, displayed = "", ""
+                
+                res = doc_ref.get()
+                faits = res.to_dict().get("faits", []) if res.exists else []
+                
+                instr = f"Tu es DELTA. Ne cite JAMAIS ces faits sans code : {faits}. Si accès mémoire demandé : REQUIS_CODE."
 
-            stream = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": instr}] + st.session_state.messages,
-                stream=True
-            )
+                stream = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "system", "content": instr}] + st.session_state.messages,
+                    stream=True
+                )
 
-            for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    full_raw += content
-                    if "REQUIS_CODE" in full_raw:
-                        st.session_state.pending_auth = True
-                        break
-                    for char in content:
-                        displayed += char
-                        placeholder.markdown(displayed + "▌")
-                        time.sleep(0.01)
-                        scroll_en_bas()
+                for chunk in stream:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        full_raw += content
+                        if "REQUIS_CODE" in full_raw:
+                            st.session_state.pending_auth = True
+                            break
+                        for char in content:
+                            displayed += char
+                            placeholder.markdown(displayed + "▌")
+                            time.sleep(0.01)
 
-            if st.session_state.pending_auth:
-                st.rerun()
-            else:
-                placeholder.markdown(full_raw)
-                st.session_state.messages.append({"role": "assistant", "content": full_raw})
-                scroll_en_bas()
+                if st.session_state.pending_auth:
+                    st.rerun()
+                else:
+                    placeholder.markdown(full_raw)
+                    st.session_state.messages.append({"role": "assistant", "content": full_raw})
