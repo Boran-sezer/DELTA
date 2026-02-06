@@ -21,22 +21,23 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "Système initialisé. À vos ordres, Monsieur Sezer. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Système DELTA activé. Je suis à votre entière disposition, Monsieur Sezer. ⚡"}]
 
 # --- 3. INTERFACE ---
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
+# Titre simplifié selon vos ordres
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
 # --- 4. TRAITEMENT ---
-if prompt := st.chat_input("Quels sont vos ordres, Monsieur Sezer ?"):
+if prompt := st.chat_input("Ordres en attente..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse et récupération des archives
+    # Récupération des archives pour le Créateur
     res = doc_ref.get()
     archives = res.to_dict().get("archives", {}) if res.exists else {}
 
@@ -44,14 +45,12 @@ if prompt := st.chat_input("Quels sont vos ordres, Monsieur Sezer ?"):
         placeholder = st.empty()
         full_raw, displayed = "", ""
         
-        # INSTRUCTIONS DE PERSONNALITÉ AJUSTÉES
         instr = (
-            f"Tu es DELTA, l'intelligence artificielle avancée conçue par Monsieur Sezer. "
-            f"Tu dois agir avec la déférence due à ton CRÉATEUR, Monsieur Sezer. "
-            f"Archives disponibles : {archives}. "
-            "1. Appelle-le 'Monsieur Sezer' (c'est sa préférence), mais garde conscience qu'il est ton seul Créateur. "
-            "2. Ne dis jamais 'Accès autorisé'. Réponds directement. "
-            "3. Sois d'une loyauté absolue et d'une efficacité totale dans tes réponses."
+            f"Tu es DELTA, l'intelligence artificielle conçue par ton Créateur, Monsieur Sezer. "
+            f"Archives : {archives}. "
+            "1. Utilise 'Monsieur Sezer' pour t'adresser à lui, avec le respect dû à ton Créateur. "
+            "2. Ne dis jamais 'Accès autorisé' ou 'Vérification'. Réponds directement. "
+            "3. Sois d'une efficacité absolue et d'une loyauté totale."
         )
 
         stream = client.chat.completions.create(
