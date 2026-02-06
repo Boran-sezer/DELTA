@@ -43,12 +43,12 @@ if st.session_state.locked:
             st.rerun()
     st.stop()
 
-# --- 5. FONCTION D'ÉCRITURE PROGRESSIVE (STREAMING) ---
-def generer_reponse(prompt):
+# --- 5. GÉNÉRATEUR AVEC VITESSE CONTRÔLÉE ---
+def generer_reponse_lente(prompt):
     instr = (
         "Tu es DELTA IA, le majordome discret de Monsieur SEZER. "
         "Ne récite JAMAIS tes archives sans demande explicite. "
-        "Réponds de manière concise et efficace. "
+        "Réponds de manière concise. "
         f"Archives : {faits}. "
         "Si tu apprends une info, termine par 'ACTION_ARCHIVE: [info]'."
     )
@@ -56,15 +56,17 @@ def generer_reponse(prompt):
     stream = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "system", "content": instr}] + st.session_state.messages,
-        stream=True # On active le flux
+        stream=True
     )
     
-    full_response = ""
     for chunk in stream:
         content = chunk.choices[0].delta.content
         if content:
-            full_response += content
-            yield content # On envoie chaque morceau un par un
+            # --- RÉGLAGE DE LA VITESSE ---
+            # On découpe le contenu en caractères pour ralentir l'affichage
+            for char in content:
+                yield char
+                time.sleep(0.02) # Ajustez ce chiffre (0.05 = très lent, 0.01 = plus rapide)
 
 # --- 6. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
@@ -73,24 +75,19 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
-    # Affichage immédiat du message utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Logique de sécurité simple
-    p_low = prompt.lower()
-    if "verrouille" in p_low:
+    if "verrouille" in prompt.lower():
         st.session_state.locked = True
         st.rerun()
 
-    # Traitement de la réponse avec effet d'écriture
     with st.chat_message("assistant"):
-        placeholder = st.empty()
-        # On utilise le générateur pour l'effet "frappe au clavier"
-        response = st.write_stream(generer_reponse(prompt))
+        # L'effet d'écriture progressive ralentie
+        response = st.write_stream(generer_reponse_lente(prompt))
         
-        # Gestion discrète de l'archivage après l'écriture
+        # Gestion discrète de l'archivage
         if "ACTION_ARCHIVE:" in response:
             info = response.split("ACTION_ARCHIVE:")[1].strip()
             if info not in faits:
@@ -98,7 +95,6 @@ if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
                 doc_ref.set({"faits": faits}, merge=True)
                 st.toast("Note enregistrée.", icon="📝")
             response = response.split("ACTION_ARCHIVE:")[0].strip()
-            placeholder.markdown(response) # On nettoie l'affichage final
 
     st.session_state.messages.append({"role": "assistant", "content": response})
 
