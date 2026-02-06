@@ -20,26 +20,20 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. SYSTEME DE VERROUILLAGE ---
-def check_password():
-    def password_entered():
-        if st.session_state["password"] == "VOTRE_CODE_ICI": # Remplacez par votre code
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
+# --- 2. GESTION DU VERROUILLAGE DYNAMIQUE ---
+if "locked" not in st.session_state:
+    st.session_state.locked = False
 
-    if "password_correct" not in st.session_state:
-        st.markdown("<h2 style='color:#00d4ff;text-align:center;'>ACCÈS RESTREINT - UNITÉ DELTA</h2>", unsafe_allow_html=True)
-        st.text_input("Code d'accès requis", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.error("Code erroné.")
-        st.text_input("Code d'accès requis", type="password", on_change=password_entered, key="password")
-        return False
-    return True
+def unlock():
+    if st.session_state.pass_input == "B2008a2020@":
+        st.session_state.locked = False
+        st.toast("🔓 Accès rétabli, Monsieur Sezer.")
+    else:
+        st.error("Code incorrect.")
 
-if not check_password():
+if st.session_state.locked:
+    st.markdown("<h2 style='color:#ff4b4b;text-align:center;'>🔒 SYSTÈME VERROUILLÉ</h2>", unsafe_allow_html=True)
+    st.text_input("Saisissez le code de sécurité", type="password", key="pass_input", on_change=unlock)
     st.stop()
 
 # --- 3. RÉCUPÉRATION DES DONNÉES ---
@@ -48,7 +42,7 @@ archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 4. INTERFACE ---
 st.set_page_config(page_title="DELTA AI", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA ACTIVE</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -56,15 +50,18 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 5. LOGIQUE AUTONOME ---
-if prompt := st.chat_input("Commandes..."):
+# --- 5. LOGIQUE DE TRAITEMENT ---
+if prompt := st.chat_input("Message pour DELTA..."):
+    # Commande de verrouillage manuelle
+    if any(word in prompt.lower() for word in ["verrouille", "verrouillage", "lock"]):
+        st.session_state.locked = True
+        st.rerun()
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Analyse d'archivage discrète
-    sys_analyse = (f"Archives : {archives}. "
-                   "Garde l'essentiel. JSON : {'action':'add', 'cat':'NOM', 'val':'INFO'} ou {'action':'none'}")
-    
+    # Archivage discret
+    sys_analyse = f"Archives : {archives}. JSON : {{'action':'add', 'cat':'NOM', 'val':'INFO'}} ou {{'action':'none'}}"
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
@@ -85,8 +82,7 @@ if prompt := st.chat_input("Commandes..."):
 
     # Réponse de DELTA
     with st.chat_message("assistant"):
-        instr = (f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
-                 f"Mémoire : {archives}. Sois bref et technique.")
+        instr = f"Tu es DELTA. Créateur : Monsieur Sezer Boran. Mémoire : {archives}. Sois bref."
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
@@ -95,7 +91,7 @@ if prompt := st.chat_input("Commandes..."):
             )
             final = resp.choices[0].message.content
         except:
-            final = "Erreur de flux. Réessayez."
+            final = "Système opérationnel."
         
         st.markdown(final)
         st.session_state.messages.append({"role": "assistant", "content": final})
