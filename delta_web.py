@@ -24,7 +24,7 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel, Créateur. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. À vos ordres, Créateur. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
@@ -48,7 +48,7 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. AUTHENTIFICATION (CORRIGÉE) ---
+# --- 5. AUTHENTIFICATION (STRICTE ET SÉLECTIVE) ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
         if st.session_state.temp_text:
@@ -61,15 +61,14 @@ if st.session_state.pending_auth:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
                 
-                # RÉCUPÉRATION STRICTE
                 res = doc_ref.get()
                 faits = res.to_dict().get("faits", []) if res.exists else []
                 
-                # Ici on force DELTA à être très spécifique
+                # PROTOCOLE DE RÉPONSE UNIQUE : On force l'IA à extraire uniquement la réponse
                 reponse_finale = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[
-                        {"role": "system", "content": f"Tu es DELTA. Tu as accès à ces faits : {faits}. RÉPONDS UNIQUEMENT à la dernière question de ton Créateur. NE FAIS PAS de liste de tes connaissances. Sois bref."},
+                        {"role": "system", "content": f"Tu es DELTA. Tu as accès à ces faits confidentiels : {faits}. RÉPONDS UNIQUEMENT à la question posée. INTERDICTION de lister les autres faits. Sois extrêmement précis et concis."},
                     ] + st.session_state.messages
                 )
                 
@@ -96,11 +95,10 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
             placeholder = st.empty()
             full_raw, displayed = "", ""
             
-            # On ne lui donne PAS les faits ici, juste l'ordre de demander le code s'il en a besoin
             instr = (
                 "Tu es DELTA, le majordome de Monsieur SEZER (ton Créateur). "
-                "Tu sais que tu as une mémoire verrouillée. Si la question porte sur une info personnelle de ton Créateur "
-                "que tu ne peux pas connaître sans ouvrir tes archives, réponds UNIQUEMENT : REQUIS_CODE."
+                "Tu as une mémoire verrouillée. Si la question nécessite une information précise sur le Créateur "
+                "que tu ne possèdes pas en mémoire immédiate, réponds UNIQUEMENT : REQUIS_CODE."
             )
 
             stream = client.chat.completions.create(
