@@ -24,12 +24,12 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. En attente de vos ordres, Monsieur SEZER. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
 
-# --- 3. SÉCURITÉ LOCKDOWN ---
+# --- 3. SÉCURITÉ LOCKDOWN (En haut car c'est un blocage total) ---
 if st.session_state.locked:
     st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
     m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_field")
@@ -47,20 +47,21 @@ faits = res.to_dict().get("faits", []) if res.exists else []
 # --- 5. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
+# Affichage de l'historique
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 6. AUTHENTIFICATION ---
+# --- 6. GESTION DE L'AUTHENTIFICATION (Placée ici pour rester en bas) ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
-        st.warning(f"🔒 Accès restreint. Tentatives : {3 - st.session_state.essais}/3")
-        c = st.text_input("Code :", type="password", key="auth_field")
+        st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
+        c = st.text_input("Entrez votre code :", type="password", key="auth_input")
         if st.button("VALIDER"):
             if c == CODE_ACT:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
-                txt = "Accès autorisé. Voici vos informations confidentielles : \n\n" + "\n".join([f"- {i}" for i in faits])
+                txt = "Accès autorisé. Archives : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
@@ -68,17 +69,13 @@ if st.session_state.pending_auth:
                 if st.session_state.essais >= 3:
                     st.session_state.locked = True
                 st.rerun()
-    st.stop()
+    st.stop() # Bloque l'input de chat pendant qu'on demande le code
 
-# --- 7. TRAITEMENT ---
-if prompt := st.chat_input("Ordres ?"):
+# --- 7. TRAITEMENT DES MESSAGES ---
+if prompt := st.chat_input("Vos ordres ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    st.rerun()
-
-if st.session_state.messages[-1]["role"] == "user":
-    last_prompt = st.session_state.messages[-1]["content"]
     
-    if "verrouille" in last_prompt.lower():
+    if "verrouille" in prompt.lower():
         st.session_state.locked = True
         st.rerun()
 
@@ -86,11 +83,9 @@ if st.session_state.messages[-1]["role"] == "user":
         placeholder = st.empty()
         full_raw, displayed = "", ""
         
-        # Consignes renforcées
         instr = (
-            f"Tu es DELTA. Tu ne dois JAMAIS citer les faits suivants sans que l'utilisateur n'ait validé le code : {faits}. "
-            "Si l'utilisateur pose une question sur son identité, ses préférences ou demande de voir sa mémoire, "
-            "tu dois IMPÉRATIVEMENT répondre uniquement : REQUIS_CODE."
+            f"Tu es DELTA. Ne cite JAMAIS ces faits sans code : {faits}. "
+            "Si on te demande qui tu es, ce que tu sais, ou des infos personnelles : réponds REQUIS_CODE."
         )
 
         stream = client.chat.completions.create(
@@ -103,17 +98,15 @@ if st.session_state.messages[-1]["role"] == "user":
             content = chunk.choices[0].delta.content
             if content:
                 full_raw += content
-                # Filtre Python de secours : si l'IA essaie de tricher
                 if "REQUIS_CODE" in full_raw:
+                    st.session_state.pending_auth = True
                     break
-                
                 for char in content:
                     displayed += char
                     placeholder.markdown(displayed + "▌")
                     time.sleep(0.01)
 
-        if "REQUIS_CODE" in full_raw:
-            st.session_state.pending_auth = True
+        if st.session_state.pending_auth:
             st.rerun()
         else:
             placeholder.markdown(full_raw)
