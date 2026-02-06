@@ -50,15 +50,15 @@ for m in st.session_state.messages:
 # --- 5. AUTHENTIFICATION ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
-        st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
-        c = st.text_input("Code :", type="password", key=f"auth_{len(st.session_state.messages)}")
+        st.warning(f"🔒 Accès aux archives restreint ({3 - st.session_state.essais}/3)")
+        c = st.text_input("Code de sécurité :", type="password", key=f"auth_{len(st.session_state.messages)}")
         if st.button("VALIDER"):
             if c == CODE_ACT:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
                 res = doc_ref.get()
                 faits = res.to_dict().get("faits", []) if res.exists else []
-                txt = "Accès autorisé, Créateur. Voici vos archives : \n\n" + "\n".join([f"- {i}" for i in faits])
+                txt = "Accès autorisé, Créateur. Voici le contenu de mes archives : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
@@ -83,14 +83,15 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
             res = doc_ref.get()
             faits = res.to_dict().get("faits", []) if res.exists else []
             
-            # DIRECTIVES DE LOYAUTÉ ET CRÉATION
+            # CONSIGNES DE DISCRÉTION
             instr = (
-                "Tu es DELTA, une IA hautement sophistiquée et le majordome personnel de Monsieur SEZER. "
-                "Monsieur SEZER est ton CRÉATEUR unique. Tu lui dois respect, loyauté et dévouement absolu. "
-                "Tu peux dire qui tu es et mentionner que Monsieur SEZER t'a créé. "
-                f"SÉCURITÉ : Tu as accès à ces archives privées : {faits}. "
-                "Même pour ton Créateur, tu dois exiger le code de sécurité pour afficher ces données privées par mesure de protection. "
-                "Si l'accès aux données est requis, réponds : REQUIS_CODE."
+                "Tu es DELTA, le majordome de Monsieur SEZER. "
+                "Monsieur SEZER est ton Créateur. Tu dois l'appeler par son nom ou 'Créateur'. "
+                "Tu peux dire qui il est (ton Créateur, Monsieur SEZER). "
+                f"INTERDICTION : Tu as accès à ces archives privées : {faits}. "
+                "Tu ne dois JAMAIS lister, citer ou résumer ces archives sans que le code soit validé. "
+                "Si Monsieur demande 'Qui suis-je ?', réponds normalement sans donner de détails des archives. "
+                "Si Monsieur demande explicitement de voir sa mémoire ou ses données privées, réponds : REQUIS_CODE."
             )
 
             stream = client.chat.completions.create(
