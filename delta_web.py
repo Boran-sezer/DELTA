@@ -24,7 +24,7 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. En attente d'ordres. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
@@ -47,6 +47,7 @@ faits = res.to_dict().get("faits", []) if res.exists else []
 # --- 5. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
+# Affichage de l'historique (C'est ici que l'image reste fixe pour chaque message passé)
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
@@ -60,7 +61,7 @@ if st.session_state.pending_auth:
             if c == CODE_ACT:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
-                txt = "Accès autorisé. Voici vos notes confidentielles : \n\n" + "\n".join([f"- {i}" for i in faits])
+                txt = "Accès autorisé. Archives : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
@@ -70,13 +71,17 @@ if st.session_state.pending_auth:
                 st.rerun()
     st.stop()
 
-# --- 7. TRAITEMENT ---
+# --- 7. TRAITEMENT ET AFFICHAGE ---
 if prompt := st.chat_input("Ordres ?"):
+    # On affiche immédiatement le message utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.rerun() # On force le rafraîchissement pour que l'input soit traité dans la boucle d'affichage
 
-    if "verrouille" in prompt.lower():
+# Logique de réponse (se déclenche après le rerun si le dernier message est 'user')
+if st.session_state.messages[-1]["role"] == "user":
+    last_prompt = st.session_state.messages[-1]["content"]
+    
+    if "verrouille" in last_prompt.lower():
         st.session_state.locked = True
         st.rerun()
 
@@ -108,3 +113,4 @@ if prompt := st.chat_input("Ordres ?"):
         else:
             placeholder.markdown(full_raw)
             st.session_state.messages.append({"role": "assistant", "content": full_raw})
+            # Pas de rerun ici pour laisser le message s'afficher correctement avec son image
