@@ -6,7 +6,7 @@ import base64
 import json
 import time
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONFIGURATION DES ACCÈS ---
 CODE_ACT = "20082008"
 CODE_MASTER = "B2008a2020@"
 
@@ -22,37 +22,73 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
-# --- 2. ÉTATS ---
-if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. ⚡"}]
-if "locked" not in st.session_state: st.session_state.locked = False
-if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
+# --- 2. ÉTATS DE SESSION (MÉMOIRE VIVE) ---
+states = {
+    "messages": [{"role": "assistant", "content": "DELTA opérationnel. Prêt pour vos ordres, Monsieur SEZER. ⚡"}],
+    "locked": False,
+    "pending_auth": False,
+    "essais": 0
+}
+for key, val in states.items():
+    if key not in st.session_state:
+        st.session_state[key] = val
 
-# --- 3. MÉMOIRE ---
+# --- 3. RÉCUPÉRATION DE LA MÉMOIRE LONG TERME ---
 res = doc_ref.get()
 faits = res.to_dict().get("faits", []) if res.exists else []
 
-# --- 4. LOCKDOWN ---
+# --- 4. SÉCURITÉ : MODE LOCKDOWN ---
 if st.session_state.locked:
-    st.error("🚨 SYSTÈME VERROUILLÉ")
-    if st.text_input("CODE MAÎTRE :", type="password", key="m_lock") == CODE_MASTER:
-        st.session_state.locked = False
-        st.rerun()
+    st.error("🚨 SYSTÈME VERROUILLÉ - TROP DE TENTATIVES")
+    m_input = st.text_input("ENTREZ LE CODE MAÎTRE POUR RÉACTIVER :", type="password", key="master_field")
+    if st.button("🔓 RÉACTIVER LE SYSTÈME"):
+        if m_input == CODE_MASTER:
+            st.session_state.locked = False
+            st.session_state.essais = 0
+            st.session_state.messages.append({"role": "assistant", "content": "Système réinitialisé par Code Maître. Bienvenue, Monsieur."})
+            st.rerun()
+        else:
+            st.error("Code Maître invalide.")
     st.stop()
 
-# --- 5. INTERFACE ---
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
+# --- 5. INTERFACE ET HISTORIQUE ---
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# --- 6. GESTION DES INPUTS ---
-if prompt := st.chat_input("Ordres ?"):
+# --- 6. ÉCRAN D'AUTHENTIFICATION (DÉCLENCHÉ PAR DELTA) ---
+if st.session_state.pending_auth:
+    with st.chat_message("assistant"):
+        st.warning(f"🔒 Accès restreint. Tentatives restantes : {3 - st.session_state.essais}")
+        c = st.text_input("Veuillez décliner votre identité (Code) :", type="password", key="delta_auth_field")
+        
+        if st.button("CONFIRMER L'ACCÈS"):
+            if c == CODE_ACT:
+                st.session_state.pending_auth = False
+                st.session_state.essais = 0
+                info_txt = "Accès autorisé. Voici vos notes confidentielles : \n\n" + "\n".join([f"- {i}" for i in faits])
+                st.session_state.messages.append({"role": "assistant", "content": info_txt})
+                st.rerun()
+            else:
+                st.session_state.essais += 1
+                if st.session_state.essais >= 3:
+                    st.session_state.locked = True
+                    st.session_state.pending_auth = False
+                    st.rerun()
+                else:
+                    st.error(f"Accès refusé. Tentative {st.session_state.essais}/3.")
+    st.stop()
+
+# --- 7. TRAITEMENT DES ORDRES ---
+if prompt := st.chat_input("Vos ordres, Monsieur SEZER ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    p_low = prompt.lower()
-    
-    # Verrouillage manuel toujours possible
-    if "verrouille" in p_low:
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Commande manuelle de verrouillage
+    if "verrouille" in prompt.lower():
         st.session_state.locked = True
         st.rerun()
 
@@ -60,12 +96,12 @@ if prompt := st.chat_input("Ordres ?"):
         placeholder = st.empty()
         full_raw, displayed = "", ""
         
-        # Consigne : DELTA doit demander le code s'il touche aux archives
+        # Instructions pour l'intelligence de DELTA
         instr = (
-            f"Tu es DELTA, majordome de Monsieur SEZER. Ultra-concis. "
-            f"Archives : {faits}. "
-            "IMPORTANT : Si Monsieur te demande une information qui se trouve dans tes archives "
-            "ou s'il veut voir sa mémoire, tu DOIS répondre EXACTEMENT : REQUIS_CODE. "
+            f"Tu es DELTA, le majordome de Monsieur SEZER. Sois ultra-concis. "
+            f"Tu as accès à ces archives : {faits}. "
+            "PROTOCOLE : Si Monsieur pose une question sur ses informations personnelles, "
+            "ses archives ou demande à voir sa mémoire, réponds EXACTEMENT : REQUIS_CODE. "
             "Sinon, réponds normalement."
         )
 
@@ -85,26 +121,10 @@ if prompt := st.chat_input("Ordres ?"):
                     placeholder.markdown(displayed + "▌")
                     time.sleep(0.01)
 
-        # Si l'IA a décidé de demander le code
+        # Vérification si l'IA demande le code
         if "REQUIS_CODE" in full_raw:
             st.session_state.pending_auth = True
             st.rerun()
         else:
             placeholder.markdown(full_raw)
             st.session_state.messages.append({"role": "assistant", "content": full_raw})
-            st.rerun()
-
-# --- 7. ÉCRAN D'AUTHENTIFICATION DÉCLENCHÉ PAR DELTA ---
-if st.session_state.pending_auth:
-    with st.chat_message("assistant"):
-        st.warning("🔒 DELTA : Cette information nécessite une clé d'accès.")
-        c = st.text_input("Code de sécurité :", type="password", key="delta_auth")
-        if st.button("DÉVERROUILLER"):
-            if c == CODE_ACT:
-                st.session_state.pending_auth = False
-                # DELTA affiche alors les infos
-                info_txt = "Accès autorisé. Voici les notes archivées : \n\n" + "\n".join([f"- {i}" for i in faits])
-                st.session_state.messages.append({"role": "assistant", "content": info_txt})
-                st.rerun()
-            else:
-                st.error("Code incorrect.")
