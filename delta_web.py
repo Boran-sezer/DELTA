@@ -43,8 +43,8 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. MOTEUR DE TRAITEMENT (AVEC SUPPRESSION) ---
-if prompt := st.chat_input("Ordre : Ajoute, Renomme ou Supprime..."):
+# --- 4. MOTEUR DE TRAITEMENT ---
+if prompt := st.chat_input("Ordre..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
@@ -53,8 +53,8 @@ if prompt := st.chat_input("Ordre : Ajoute, Renomme ou Supprime..."):
         "Réponds UNIQUEMENT en JSON : "
         "{'action':'add', 'cat':'nom', 'val':'texte'} "
         "{'action':'rename', 'old':'nom', 'new':'nom'} "
-        "{'action':'delete_cat', 'cat':'nom'} (pour un dossier) "
-        "{'action':'delete_val', 'cat':'nom', 'val':'texte'} (pour une ligne) "
+        "{'action':'delete_cat', 'cat':'nom'} "
+        "{'action':'delete_val', 'cat':'nom', 'val':'texte'} "
         "Sinon {'action':'none'}"
     )
     
@@ -71,29 +71,22 @@ if prompt := st.chat_input("Ordre : Ajoute, Renomme ou Supprime..."):
             action = data.get('action')
             modif = False
 
-            # AJOUT
             if action == 'add':
                 c, v = data.get('cat', 'Général'), data.get('val')
                 if v:
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
                     modif = True
-            
-            # RENOMMAGE
             elif action == 'rename':
                 o, n = data.get('old'), data.get('new')
                 if o in archives:
                     archives[n] = archives.pop(o)
                     modif = True
-
-            # SUPPRIMER DOSSIER
             elif action == 'delete_cat':
                 c = data.get('cat')
                 if c in archives:
                     del archives[c]
                     modif = True
-
-            # SUPPRIMER LIGNE PRÉCISE
             elif action == 'delete_val':
                 c, v = data.get('cat'), data.get('val')
                 if c in archives and v in archives[c]:
@@ -102,18 +95,29 @@ if prompt := st.chat_input("Ordre : Ajoute, Renomme ou Supprime..."):
 
             if modif:
                 doc_ref.set({"archives": archives})
-                st.toast("🗑️ Mise à jour des archives effectuée")
+                st.toast("🗑️ Mise à jour effectuée")
                 time.sleep(0.5)
                 st.rerun()
     except: pass
 
-    # RÉPONSE DE DELTA
+    # --- 5. RÉPONSE DE DELTA (AVEC ANTI-CRASH) ---
     with st.chat_message("assistant"):
-        instr = f"Tu es DELTA. Archives : {archives}. Réponds brièvement à Monsieur Sezer."
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", 
-            messages=[{"role": "system", "content": instr}] + st.session_state.messages
-        )
-        final = resp.choices[0].message.content
+        instr = f"Tu es DELTA. Archives : {archives}. Réponds brièvement à Monsieur Sezer. Ne dis jamais 'Accès autorisé'."
+        
+        try:
+            # On essaye le gros modèle
+            resp = client.chat.completions.create(
+                model="llama-3.3-70b-versatile", 
+                messages=[{"role": "system", "content": instr}] + st.session_state.messages
+            )
+            final = resp.choices[0].message.content
+        except Exception:
+            # SI RATE LIMIT (OU AUTRE) : On bascule sur le modèle rapide sans crash
+            resp = client.chat.completions.create(
+                model="llama-3.1-8b-instant", 
+                messages=[{"role": "system", "content": instr}] + st.session_state.messages
+            )
+            final = resp.choices[0].message.content
+        
         st.markdown(final)
         st.session_state.messages.append({"role": "assistant", "content": final})
