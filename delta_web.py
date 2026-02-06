@@ -45,7 +45,7 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. LOGIQUE MULTI-ACTION (VOTRE VERSION RESTAURÉE) ---
+# --- 4. LOGIQUE MULTI-ACTION (VERSION CORRIGÉE) ---
 if prompt := st.chat_input("Ordres pour vos archives..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -55,11 +55,11 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
         f"Archives actuelles : {archives}. "
         f"Ordre : '{prompt}'. "
         "Tu es un terminal de données. Réponds UNIQUEMENT par un objet JSON. "
-        "Si l'ordre est d'ajouter: {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
-        "Si l'ordre est de renommer une catégorie: {'action': 'rename_partie', 'old': 'ancien', 'new': 'nouveau'} "
-        "Si l'ordre est de supprimer une partie: {'action': 'delete_partie', 'target': 'nom'} "
-        "Si l'ordre est de supprimer une ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'} "
-        "Si l'ordre est de modifier: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'} "
+        "1. Ajouter info: {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
+        "2. Renommer catégorie: {'action': 'rename_cat', 'old': 'nom', 'new': 'nom'} "
+        "3. Supprimer catégorie: {'action': 'delete_partie', 'target': 'nom'} "
+        "4. Supprimer ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'} "
+        "5. Modifier ligne: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'} "
         "Sinon, réponds 'NON'."
     )
     
@@ -77,27 +77,36 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
             action = data.get('action')
             modif = False
 
+            # AJOUT
             if action == 'add':
                 p = data.get('partie', 'Général')
                 if p not in archives: archives[p] = []
                 archives[p].append(data.get('info'))
                 modif = True
-            elif action == 'rename_partie':
+            
+            # RENOMMER CATÉGORIE
+            elif action == 'rename_cat':
                 old_n, new_n = data.get('old'), data.get('new')
                 if old_n in archives:
                     archives[new_n] = archives.pop(old_n)
                     modif = True
+
+            # SUPPRIMER PARTIE
             elif action == 'delete_partie':
                 target = data.get('target', '').lower()
                 for k in list(archives.keys()):
                     if target in k.lower():
                         del archives[k]
                         modif = True
+            
+            # SUPPRIMER INFO
             elif action == 'delete_info':
                 p, info = data.get('partie'), data.get('info')
                 if p in archives and info in archives[p]:
                     archives[p].remove(info)
                     modif = True
+            
+            # MODIFIER INFO
             elif action == 'update':
                 p, old, new = data.get('partie'), data.get('old'), data.get('new')
                 if p in archives and old in archives[p]:
@@ -107,28 +116,27 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
 
             if modif:
                 doc_ref.set({"archives": archives})
-                st.toast("✅ Base mise à jour.")
+                st.toast("✅ Mise à jour effectuée.")
                 time.sleep(0.4)
                 st.rerun()
     except Exception as e:
         st.error(f"Erreur : {e}")
 
-    # B. RÉPONSE DE DELTA AVEC PROTECTION ANTI-CRASH
+    # B. RÉPONSE DE DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_raw = ""
-        instr = f"Tu es DELTA, créé par Monsieur Sezer. Archives : {archives}. Sois bref."
+        instr = f"Tu es DELTA, l'IA de Monsieur Sezer. Archives : {archives}. Ne dis jamais 'accès autorisé'."
         
         try:
-            # On essaye le modèle 70b
             stream = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "system", "content": instr}] + st.session_state.messages, stream=True)
             for chunk in stream:
                 content = chunk.choices[0].delta.content
                 if content:
                     full_raw += content
                     placeholder.markdown(full_raw + "▌")
-        except Exception:
-            # SI RATE LIMIT : On bascule sur le 8b pour éviter l'écran d'erreur
+        except:
+            # Secours si le gros modèle bloque
             resp = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "system", "content": instr}] + st.session_state.messages)
             full_raw = resp.choices[0].message.content
         
