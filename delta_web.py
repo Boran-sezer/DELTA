@@ -1,4 +1,4 @@
-import streamlit as st
+ import streamlit as st
 from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -29,68 +29,64 @@ if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
 
-# --- 3. SÉCURITÉ PRIORITAIRE : MODE LOCKDOWN ---
-# Ce bloc doit être avant TOUT affichage pour bloquer l'accès
+# --- 3. SÉCURITÉ PRIORITAIRE ---
 if st.session_state.locked:
     st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
-    st.error("Sécurité maximale activée suite à une intrusion ou un ordre manuel.")
     m_input = st.text_input("CODE MAÎTRE :", type="password", key="master_field")
     if st.button("🔓 RÉACTIVER"):
         if m_input == CODE_MASTER:
             st.session_state.locked = False
             st.session_state.essais = 0
             st.rerun()
-        else:
-            st.error("Code Maître invalide.")
-    st.stop() # Arrête le reste du script ici
+    st.stop()
 
 # --- 4. RÉCUPÉRATION MÉMOIRE ---
 res = doc_ref.get()
 faits = res.to_dict().get("faits", []) if res.exists else []
 
-# --- 5. INTERFACE ET HISTORIQUE ---
+# --- 5. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
+# Affichage des anciens messages avec avatar
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# --- 6. ÉCRAN D'AUTHENTIFICATION (3 ESSAIS) ---
+# --- 6. AUTHENTIFICATION ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
-        st.warning(f"🔒 Accès restreint. Tentatives : {3 - st.session_state.essais}/3")
+        st.warning(f"🔒 Tentatives : {3 - st.session_state.essais}/3")
         c = st.text_input("Code :", type="password", key="delta_auth_field")
         if st.button("VALIDER"):
             if c == CODE_ACT:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
-                info_txt = "Accès autorisé. Archives : \n\n" + "\n".join([f"- {i}" for i in faits])
-                st.session_state.messages.append({"role": "assistant", "content": info_txt})
+                txt = "Accès autorisé. Archives : \n\n" + "\n".join([f"- {i}" for i in faits])
+                st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
                 st.session_state.essais += 1
                 if st.session_state.essais >= 3:
                     st.session_state.locked = True
-                    st.session_state.pending_auth = False
                 st.rerun()
     st.stop()
 
-# --- 7. TRAITEMENT DES ORDRES ---
+# --- 7. TRAITEMENT ET AFFICHAGE DYNAMIQUE ---
 if prompt := st.chat_input("Ordres ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Commande de verrouillage manuelle
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
     if "verrouille" in prompt.lower():
         st.session_state.locked = True
         st.rerun()
 
+    # Création de la zone de réponse avec avatar fixe
     with st.chat_message("assistant"):
-        placeholder = st.empty()
+        placeholder = st.empty() # Zone de texte évolutive
         full_raw, displayed = "", ""
         
-        instr = (
-            f"Tu es DELTA. Ultra-concis. Archives : {faits}. "
-            "Si Monsieur veut voir sa mémoire ou ses infos : réponds REQUIS_CODE."
-        )
+        instr = f"Tu es DELTA. Ultra-concis. Archives : {faits}. Si accès mémoire demandé : REQUIS_CODE."
 
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -105,6 +101,7 @@ if prompt := st.chat_input("Ordres ?"):
                 if "REQUIS_CODE" in full_raw: break
                 for char in content:
                     displayed += char
+                    # L'avatar reste grâce à 'with st.chat_message'
                     placeholder.markdown(displayed + "▌")
                     time.sleep(0.01)
 
