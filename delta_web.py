@@ -21,59 +21,81 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel, Créateur. Accès libre et gestion intelligente activés. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. Je peux organiser vos archives sur simple commande, Créateur. ⚡"}]
 
 # --- 3. INTERFACE ---
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA - SYSTÈME OUVERT</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA - GESTIONNAIRE D'ARCHIVES</h1>", unsafe_allow_html=True)
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. TRAITEMENT, TRI AUTOMATIQUE ET RÉPONSE ---
-if prompt := st.chat_input("Vos ordres, Créateur ?"):
+# --- 4. TRAITEMENT ET RÉORGANISATION ---
+if prompt := st.chat_input("Un changement dans les archives, Créateur ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # A. TRI AUTOMATIQUE DANS LES PARTIES (Modèle Rapide)
+    # A. ANALYSE DE L'INTENTION (TRI OU RÉORGANISATION)
+    res = doc_ref.get()
+    archives = res.to_dict().get("archives", {}) if res.exists else {}
+
     analyse_prompt = (
-        f"L'utilisateur dit : '{prompt}'. Est-ce une info personnelle à classer ? "
-        "Si oui, réponds UNIQUEMENT en JSON : {'partie': 'Catégorie', 'info': 'Détail'}. "
+        f"Archives actuelles : {archives}. "
+        f"L'utilisateur dit : '{prompt}'. "
+        "Si l'utilisateur veut RÉORGANISER (déplacer, renommer, supprimer), réponds UNIQUEMENT en JSON avec l'action : "
+        "{'action': 'rename_partie/move_info/delete_partie', 'from': '...', 'to': '...', 'info': '...'}. "
+        "Si c'est juste une NOUVELLE info : {'action': 'add', 'partie': '...', 'info': '...'}. "
         "Sinon réponds 'NON'."
     )
+    
     check = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "user", "content": analyse_prompt}])
-    reponse_tri = check.choices[0].message.content.strip()
+    cmd = check.choices[0].message.content.strip()
 
-    if "{" in reponse_tri:
+    # B. LOGIQUE DE RÉORGANISATION
+    if "{" in cmd:
         try:
-            data = json.loads(reponse_tri.replace("'", '"'))
-            res = doc_ref.get()
-            archives = res.to_dict().get("archives", {}) if res.exists else {}
+            data = json.loads(cmd.replace("'", '"'))
+            action = data.get('action')
+            modif = False
+
+            if action == 'add':
+                p = data['partie']
+                if p not in archives: archives[p] = []
+                archives[p].append(data['info'])
+                modif = True
             
-            partie = data['partie']
-            if partie not in archives: archives[partie] = []
-            if data['info'] not in archives[partie]:
-                archives[partie].append(data['info'])
+            elif action == 'rename_partie':
+                if data['from'] in archives:
+                    archives[data['to']] = archives.pop(data['from'])
+                    modif = True
+            
+            elif action == 'move_info':
+                if data['from'] in archives and data['info'] in archives[data['from']]:
+                    archives[data['from']].remove(data['info'])
+                    if data['to'] not in archives: archives[data['to']] = []
+                    archives[data['to']].append(data['info'])
+                    modif = True
+            
+            elif action == 'delete_partie':
+                if data['from'] in archives:
+                    del archives[data['from']]
+                    modif = True
+
+            if modif:
                 doc_ref.set({"archives": archives})
-                st.toast(f"📂 Classé dans [{partie}] : {data['info']}")
+                st.toast(f"✅ Archives mises à jour : {action}")
         except: pass
 
-    # B. RÉPONSE DE DELTA AVEC ACCÈS DIRECT AUX ARCHIVES
+    # C. RÉPONSE DE DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_raw, displayed = "", ""
         
-        # Récupération des archives pour que l'IA puisse décider seule de les utiliser
-        res = doc_ref.get()
-        archives = res.to_dict().get("archives", {}) if res.exists else {}
-        
         instr = (
-            f"Tu es DELTA, le majordome de Monsieur SEZER (ton Créateur). "
-            f"Voici tes archives organisées par parties : {archives}. "
-            "IMPORTANT : Ne montre ou ne cite ces archives QUE si la question du Créateur le nécessite. "
-            "Si on te demande qui tu es ou ce que tu sais, sois bref. "
-            "Réponds avec dévouement et efficacité."
+            f"Tu es DELTA. Voici tes archives : {archives}. "
+            "Si l'utilisateur vient de te demander une réorganisation, confirme que c'est fait avec élégance. "
+            "Sinon, ne montre les archives que si la question le demande."
         )
 
         stream = client.chat.completions.create(
