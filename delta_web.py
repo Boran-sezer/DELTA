@@ -45,23 +45,21 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 4. LOGIQUE MULTI-ACTION AMÉLIORÉE ---
+# --- 4. LOGIQUE MULTI-ACTION (V2 - ULTRA ROBUSTE) ---
 if prompt := st.chat_input("Ordres pour vos archives..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse stricte incluant le renommage de catégorie
+    # Analyse stricte
     analyse_prompt = (
         f"Archives actuelles : {archives}. "
         f"Ordre : '{prompt}'. "
         "Tu es un terminal de données. Réponds UNIQUEMENT par un objet JSON. "
-        "Actions possibles :\n"
-        "- Ajouter: {'action': 'add', 'partie': 'nom', 'info': 'texte'}\n"
-        "- Renommer une partie (dossier): {'action': 'rename_partie', 'old': 'ancien_nom', 'new': 'nouveau_nom'}\n"
-        "- Supprimer une partie: {'action': 'delete_partie', 'target': 'nom'}\n"
-        "- Supprimer une ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'}\n"
-        "- Modifier une info: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'}\n"
+        "Si l'ordre est d'ajouter: {'action': 'add', 'partie': 'nom', 'info': 'texte'} "
+        "Si l'ordre est de supprimer une partie: {'action': 'delete_partie', 'target': 'nom'} "
+        "Si l'ordre est de supprimer une ligne: {'action': 'delete_info', 'partie': 'nom', 'info': 'texte'} "
+        "Si l'ordre est de modifier: {'action': 'update', 'partie': 'nom', 'old': 'vieux', 'new': 'neuf'} "
         "Sinon, réponds 'NON'."
     )
     
@@ -72,6 +70,8 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
             temperature=0
         )
         cmd_text = check.choices[0].message.content.strip()
+        
+        # Extraction du JSON par sécurité
         json_match = re.search(r'(\{.*\})', cmd_text, re.DOTALL)
         
         if json_match:
@@ -79,36 +79,22 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
             action = data.get('action')
             modif = False
 
-            # AJOUT
             if action == 'add':
                 p = data.get('partie', 'Général')
                 if p not in archives: archives[p] = []
                 archives[p].append(data.get('info'))
                 modif = True
-            
-            # RENOMMER UNE PARTIE (DOSSIER)
-            elif action == 'rename_partie':
-                old_n, new_n = data.get('old'), data.get('new')
-                if old_n in archives:
-                    archives[new_n] = archives.pop(old_n)
-                    modif = True
-
-            # SUPPRIMER PARTIE
             elif action == 'delete_partie':
                 target = data.get('target', '').lower()
                 for k in list(archives.keys()):
                     if target in k.lower():
                         del archives[k]
                         modif = True
-            
-            # SUPPRIMER INFO
             elif action == 'delete_info':
                 p, info = data.get('partie'), data.get('info')
                 if p in archives and info in archives[p]:
                     archives[p].remove(info)
                     modif = True
-            
-            # MODIFIER INFO DANS UNE PARTIE
             elif action == 'update':
                 p, old, new = data.get('partie'), data.get('old'), data.get('new')
                 if p in archives and old in archives[p]:
@@ -138,7 +124,7 @@ if prompt := st.chat_input("Ordres pour vos archives..."):
                     full_raw += content
                     placeholder.markdown(full_raw + "▌")
         except:
-            full_raw = "C'est fait, Monsieur Sezer. ⚡"
+            full_raw = "Mise à jour effectuée, Monsieur Sezer. ⚡"
         
         placeholder.markdown(full_raw)
         st.session_state.messages.append({"role": "assistant", "content": full_raw})
