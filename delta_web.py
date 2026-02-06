@@ -23,17 +23,14 @@ doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key="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")
 
 # --- 2. ÉTATS DE SESSION ---
-states = {
-    "messages": [{"role": "assistant", "content": "DELTA opérationnel, Créateur. ⚡"}],
-    "locked": False,
-    "pending_auth": False,
-    "essais": 0,
-    "temp_text": ""
-}
-for key, val in states.items():
-    if key not in st.session_state: st.session_state[key] = val
+if "messages" not in st.session_state: 
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. Systèmes de sécurité activés, Créateur. ⚡"}]
+if "locked" not in st.session_state: st.session_state.locked = False
+if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
+if "essais" not in st.session_state: st.session_state.essais = 0
+if "temp_text" not in st.session_state: st.session_state.temp_text = ""
 
-# --- 3. LOCKDOWN ---
+# --- 3. SÉCURITÉ LOCKDOWN (CODE MAÎTRE) ---
 if st.session_state.locked:
     st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
     m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_lock")
@@ -51,10 +48,11 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. AUTHENTIFICATION ---
+# --- 5. AUTHENTIFICATION (CODE 20082008) ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
-        if st.session_state.temp_text: st.markdown(st.session_state.temp_text + "...")
+        if st.session_state.temp_text:
+            st.markdown(st.session_state.temp_text + "...")
         st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
         c = st.text_input("Code :", type="password", key=f"auth_{len(st.session_state.messages)}")
         if st.button("VALIDER"):
@@ -69,7 +67,8 @@ if st.session_state.pending_auth:
                 st.rerun()
             else:
                 st.session_state.essais += 1
-                if st.session_state.essais >= 3: st.session_state.locked = True
+                if st.session_state.essais >= 3:
+                    st.session_state.locked = True
                 st.rerun()
 
 # --- 6. TRAITEMENT DES ORDRES ET MÉMOIRE ---
@@ -78,10 +77,11 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
         st.error("Veuillez d'abord valider le code de sécurité.")
     else:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-        # A. ANALYSE POUR MÉMOIRE (FILTRE)
-        analyse_prompt = f"L'utilisateur dit : '{prompt}'. Est-ce une information personnelle importante à retenir ? Si oui, réponds UNIQUEMENT l'info sous forme de fait court. Sinon réponds 'NON'."
+        # Filtre de mémoire (Analyse si l'info doit être sauvée)
+        analyse_prompt = f"L'utilisateur dit : '{prompt}'. Est-ce une info personnelle à retenir ? Si oui, réponds l'info courte. Sinon réponds 'NON'."
         check = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "user", "content": analyse_prompt}])
         nouveau_fait = check.choices[0].message.content.strip()
 
@@ -93,7 +93,7 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
                 doc_ref.set({"faits": faits})
                 st.toast(f"💾 Archivé : {nouveau_fait}")
 
-        # B. RÉPONSE DE DELTA
+        # Réponse de DELTA
         with st.chat_message("assistant"):
             placeholder = st.empty()
             full_raw, displayed = "", ""
@@ -103,7 +103,7 @@ if prompt := st.chat_input("Écrivez vos ordres ici..."):
             instr = (
                 "Tu es DELTA, le majordome de Monsieur SEZER (ton Créateur). "
                 f"SÉCURITÉ : Ne cite JAMAIS ces archives sans code : {faits}. "
-                "Si tu dois y accéder, réponds : REQUIS_CODE."
+                "Si tu dois y accéder, réponds REQUIS_CODE."
             )
 
             stream = client.chat.completions.create(
