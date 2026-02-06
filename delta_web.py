@@ -24,12 +24,12 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. En attente de vos ordres, Monsieur SEZER. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
 
-# --- 3. SÉCURITÉ PRIORITAIRE ---
+# --- 3. SÉCURITÉ LOCKDOWN ---
 if st.session_state.locked:
     st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
     m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_field")
@@ -47,7 +47,6 @@ faits = res.to_dict().get("faits", []) if res.exists else []
 # --- 5. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
-# Affichage de l'historique (C'est ici que l'image reste fixe pour chaque message passé)
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
@@ -55,13 +54,13 @@ for m in st.session_state.messages:
 # --- 6. AUTHENTIFICATION ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
-        st.warning(f"🔒 Tentatives : {3 - st.session_state.essais}/3")
+        st.warning(f"🔒 Accès restreint. Tentatives : {3 - st.session_state.essais}/3")
         c = st.text_input("Code :", type="password", key="auth_field")
         if st.button("VALIDER"):
             if c == CODE_ACT:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
-                txt = "Accès autorisé. Archives : \n\n" + "\n".join([f"- {i}" for i in faits])
+                txt = "Accès autorisé. Voici vos informations confidentielles : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
@@ -71,13 +70,11 @@ if st.session_state.pending_auth:
                 st.rerun()
     st.stop()
 
-# --- 7. TRAITEMENT ET AFFICHAGE ---
+# --- 7. TRAITEMENT ---
 if prompt := st.chat_input("Ordres ?"):
-    # On affiche immédiatement le message utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
-    st.rerun() # On force le rafraîchissement pour que l'input soit traité dans la boucle d'affichage
+    st.rerun()
 
-# Logique de réponse (se déclenche après le rerun si le dernier message est 'user')
 if st.session_state.messages[-1]["role"] == "user":
     last_prompt = st.session_state.messages[-1]["content"]
     
@@ -89,7 +86,12 @@ if st.session_state.messages[-1]["role"] == "user":
         placeholder = st.empty()
         full_raw, displayed = "", ""
         
-        instr = f"Tu es DELTA. Ultra-concis. Archives : {faits}. Si accès mémoire demandé : REQUIS_CODE."
+        # Consignes renforcées
+        instr = (
+            f"Tu es DELTA. Tu ne dois JAMAIS citer les faits suivants sans que l'utilisateur n'ait validé le code : {faits}. "
+            "Si l'utilisateur pose une question sur son identité, ses préférences ou demande de voir sa mémoire, "
+            "tu dois IMPÉRATIVEMENT répondre uniquement : REQUIS_CODE."
+        )
 
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -101,7 +103,10 @@ if st.session_state.messages[-1]["role"] == "user":
             content = chunk.choices[0].delta.content
             if content:
                 full_raw += content
-                if "REQUIS_CODE" in full_raw: break
+                # Filtre Python de secours : si l'IA essaie de tricher
+                if "REQUIS_CODE" in full_raw:
+                    break
+                
                 for char in content:
                     displayed += char
                     placeholder.markdown(displayed + "▌")
@@ -113,4 +118,3 @@ if st.session_state.messages[-1]["role"] == "user":
         else:
             placeholder.markdown(full_raw)
             st.session_state.messages.append({"role": "assistant", "content": full_raw})
-            # Pas de rerun ici pour laisser le message s'afficher correctement avec son image
