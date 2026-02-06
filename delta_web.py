@@ -29,13 +29,13 @@ st.set_page_config(page_title="DELTA", layout="wide")
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.title("📂 Archives de Monsieur Sezer")
+    st.title("📂 Archives")
     if archives:
         for cat, items in archives.items():
             with st.expander(f"📁 {cat}"):
                 for i in items: st.write(f"• {i}")
     else:
-        st.info("Archives vides.")
+        st.info("Vide.")
 
 if "messages" not in st.session_state: 
     st.session_state.messages = [{"role": "assistant", "content": "Système DELTA paré, Monsieur Sezer. ⚡"}]
@@ -43,74 +43,61 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- 4. TRAITEMENT DES ORDRES ---
-if prompt := st.chat_input("Votre message ou ordre..."):
+# --- 4. LOGIQUE DIRECTE ---
+if prompt := st.chat_input("Ordre..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Analyse simplifiée
-    analyse_instr = (
-        f"Archives : {list(archives.keys())}. "
-        f"Ordre : '{prompt}'. "
-        "Réponds UNIQUEMENT en JSON : "
-        "{'action': 'add', 'cat': 'nom', 'info': 'texte'} pour ajouter/sauver, "
-        "{'action': 'rename', 'old': 'nom', 'new': 'nom'} pour renommer, "
-        "sinon {'action': 'none'}."
+    # Analyse simplifiée à l'extrême
+    sys_prompt = (
+        "Tu es un robot JSON. Archives actuelles: " + str(list(archives.keys())) + ". "
+        "Si l'user veut AJOUTER: {'action': 'add', 'cat': 'nom', 'val': 'texte'}. "
+        "Si l'user veut RENOMMER dossier: {'action': 'rename', 'old': 'nom', 'new': 'nom'}. "
+        "Sinon: {'action': 'none'}."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "system", "content": "Tu es un extracteur JSON pur."}, {"role": "user", "content": analyse_instr}],
+            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
             temperature=0
         )
-        # Extraction robuste du JSON
-        match = re.search(r'\{.*\}', check.choices[0].message.content, re.DOTALL)
+        # Extraction chirurgicale
+        txt_res = check.choices[0].message.content
+        match = re.search(r'\{.*\}', txt_res, re.DOTALL)
+        
         if match:
             data = json.loads(match.group(0).replace("'", '"'))
             action = data.get('action')
-            modif = False
+            m = False
 
             if action == 'add':
-                c, i = data.get('cat', 'Général'), data.get('info')
-                if i:
+                c, v = data.get('cat', 'Général'), data.get('val')
+                if v:
                     if c not in archives: archives[c] = []
-                    archives[c].append(i)
-                    modif = True
+                    archives[c].append(v)
+                    m = True
             elif action == 'rename':
                 o, n = data.get('old'), data.get('new')
                 if o in archives:
                     archives[n] = archives.pop(o)
-                    modif = True
+                    m = True
 
-            if modif:
+            if m:
                 doc_ref.set({"archives": archives})
-                st.toast("✅ Base mise à jour")
-                time.sleep(0.5)
-                st.rerun()
-    except:
-        pass
+                st.rerun() # Rafraîchissement immédiat de la barre latérale
+    except: pass
 
-    # B. RÉPONSE DE DELTA AVEC SA MÉMOIRE
+    # B. RÉPONSE
     with st.chat_message("assistant"):
-        # On liste toutes les archives pour l'IA
-        memoire_texte = ""
-        for c, v in archives.items():
-            memoire_texte += f"Dossier {c} : {', '.join(v)}. "
-
-        instruction_finale = (
-            f"Tu es DELTA. Voici tes archives sur Monsieur Sezer : {memoire_texte}. "
-            "Utilise ces infos pour répondre. Sois bref et n'utilise pas 'accès autorisé'."
-        )
-        
+        instr = f"Tu es DELTA. Voici tes archives : {str(archives)}. Réponds brièvement à Monsieur Sezer."
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile", 
-                messages=[{"role": "system", "content": instruction_finale}] + st.session_state.messages
+                messages=[{"role": "system", "content": instr}] + st.session_state.messages
             )
-            txt = resp.choices[0].message.content
-        except:
-            txt = "Mise à jour effectuée, Monsieur Sezer. ⚡"
+            final = resp.choices[0].message.content
+        except: final = "Mise à jour effectuée. ⚡"
         
-        st.markdown(txt)
-        st.session_state.messages.append({"role": "assistant", "content": txt})
+        st.markdown(final)
+        st.session_state.messages.append({"role": "assistant", "content": final})
