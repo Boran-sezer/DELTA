@@ -24,15 +24,15 @@ client = Groq(api_key="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"
 
 # --- 2. ÉTATS DE SESSION ---
 if "messages" not in st.session_state: 
-    st.session_state.messages = [{"role": "assistant", "content": "DELTA opérationnel. ⚡"}]
+    st.session_state.messages = [{"role": "assistant", "content": "DELTA prêt. En attente de vos ordres. ⚡"}]
 if "locked" not in st.session_state: st.session_state.locked = False
 if "pending_auth" not in st.session_state: st.session_state.pending_auth = False
 if "essais" not in st.session_state: st.session_state.essais = 0
 
-# --- 3. SÉCURITÉ LOCKDOWN (En haut car c'est un blocage total) ---
+# --- 3. LOCKDOWN (BLOQUAGE TOTAL) ---
 if st.session_state.locked:
     st.markdown("<h1 style='color:red;'>🚨 SYSTÈME BLOQUÉ</h1>", unsafe_allow_html=True)
-    m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_field")
+    m_input = st.text_input("CODE MAÎTRE :", type="password", key="m_lock")
     if st.button("🔓 RÉACTIVER"):
         if m_input == CODE_MASTER:
             st.session_state.locked = False
@@ -47,21 +47,30 @@ faits = res.to_dict().get("faits", []) if res.exists else []
 # --- 5. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA IA</h1>", unsafe_allow_html=True)
 
-# Affichage de l'historique
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+# Conteneur pour la conversation (aide à stabiliser le scroll)
+chat_container = st.container()
 
-# --- 6. GESTION DE L'AUTHENTIFICATION (Placée ici pour rester en bas) ---
+with chat_container:
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+# --- 6. AUTHENTIFICATION (FIXÉE EN BAS) ---
 if st.session_state.pending_auth:
     with st.chat_message("assistant"):
-        st.warning(f"🔒 Identification requise ({3 - st.session_state.essais}/3)")
-        c = st.text_input("Entrez votre code :", type="password", key="auth_input")
-        if st.button("VALIDER"):
+        st.write("🔒 **Identification requise pour accéder à ces données.**")
+        # On utilise une colonne pour réduire la taille et éviter le saut visuel
+        c_col, b_col = st.columns([3, 1])
+        with c_col:
+            c = st.text_input(f"Code ({3 - st.session_state.essais} essais) :", type="password", key="auth_input", label_visibility="collapsed")
+        with b_col:
+            v_btn = st.button("VALIDER")
+            
+        if v_btn:
             if c == CODE_ACT:
                 st.session_state.pending_auth = False
                 st.session_state.essais = 0
-                txt = "Accès autorisé. Archives : \n\n" + "\n".join([f"- {i}" for i in faits])
+                txt = "Accès autorisé. Voici les informations : \n\n" + "\n".join([f"- {i}" for i in faits])
                 st.session_state.messages.append({"role": "assistant", "content": txt})
                 st.rerun()
             else:
@@ -69,9 +78,9 @@ if st.session_state.pending_auth:
                 if st.session_state.essais >= 3:
                     st.session_state.locked = True
                 st.rerun()
-    st.stop() # Bloque l'input de chat pendant qu'on demande le code
+    st.stop()
 
-# --- 7. TRAITEMENT DES MESSAGES ---
+# --- 7. TRAITEMENT ---
 if prompt := st.chat_input("Vos ordres ?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     
@@ -83,9 +92,12 @@ if prompt := st.chat_input("Vos ordres ?"):
         placeholder = st.empty()
         full_raw, displayed = "", ""
         
+        # Consignes affinées pour DELTA
         instr = (
-            f"Tu es DELTA. Ne cite JAMAIS ces faits sans code : {faits}. "
-            "Si on te demande qui tu es, ce que tu sais, ou des infos personnelles : réponds REQUIS_CODE."
+            f"Tu es DELTA, le majordome de Monsieur SEZER. Ultra-concis. "
+            "Tu peux dire qui tu es (DELTA) et ton rôle sans code. "
+            f"Par contre, pour TOUTE information issue de cette liste : {faits}, "
+            "ou si on te demande d'afficher ta mémoire/archives, tu DOIS répondre uniquement : REQUIS_CODE."
         )
 
         stream = client.chat.completions.create(
