@@ -6,8 +6,9 @@ from firebase_admin import credentials, firestore
 import base64
 import json
 from datetime import datetime
+import pytz
 
-# --- CONFIGURATION API ---
+# --- CONFIGURATION ---
 GROQ_API_KEY = "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"
 
 # --- INITIALISATION FIREBASE ---
@@ -23,7 +24,7 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- FONCTIONS SYSTÈME ---
+# --- NAVIGATION WEB DISCRÈTE ---
 def web_lookup(query):
     try:
         with DDGS() as ddgs:
@@ -31,83 +32,69 @@ def web_lookup(query):
             return "\n".join([f"[{r['title']}]: {r['body']}" for r in results]) if results else ""
     except: return ""
 
-def get_system_info():
-    """Récupère l'heure, la date et la localisation par défaut."""
-    now = datetime.now()
+# --- CONTEXTE TEMPOREL PASSIF ---
+def get_passive_context():
+    # Fuseau horaire Europe/Paris pour une précision totale
+    tz = pytz.timezone('Europe/Paris')
+    now = datetime.now(tz)
     return {
-        "date": now.strftime("%A %d %B %Y"),
-        "heure": now.strftime("%H:%M"),
-        "localisation": "Annecy, France"  # Localisation configurée par défaut
+        "full_date": now.strftime("%A %d %B %Y"),
+        "time": now.strftime("%H:%M"),
+        "location": "Annecy, France"
     }
 
-# --- CHARGEMENT DE LA MÉMOIRE ---
+# --- CHARGEMENT MÉMOIRE ---
 res = doc_ref.get()
 memoire = res.to_dict() if res.exists else {"profil": {}, "projets": {}, "divers": {}}
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA", layout="wide")
-st.markdown("<style>button {display:none;} #MainMenu, footer, header {visibility:hidden;} .title-delta {font-family:'Inter'; font-weight:800; font-size:clamp(2.5rem, 10vw, 4rem); text-align:center; letter-spacing:-3px; margin-top:-60px;}</style>", unsafe_allow_html=True)
+st.markdown("<style>button {display:none;} #MainMenu, footer, header {visibility:hidden;} .title-delta {font-family:'Inter'; font-weight:800; text-align:center; letter-spacing:-3px; margin-top:-60px;}</style>", unsafe_allow_html=True)
 st.markdown('<h1 class="title-delta">DELTA</h1>', unsafe_allow_html=True)
 
 if "messages" not in st.session_state: st.session_state.messages = []
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- TRAITEMENT ---
+# --- CYCLE DE RÉPONSE ---
 if prompt := st.chat_input("À votre service..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. Données Temporelles et Géographiques
-    sys_info = get_system_info()
+    # 1. Récupération du contexte invisible
+    sys_info = get_passive_context()
     
-    # 2. Analyse et Recherche Web invisible
-    decision_prompt = f"Contexte : {sys_info}. Question : '{prompt}'. Recherche web nécessaire ? OUI/NON."
+    # 2. Recherche Web (si nécessaire, totalement silencieuse)
+    decision_prompt = f"Context: {sys_info}. Query: '{prompt}'. Web search needed? OUI/NON."
     try:
-        search_needed = client.chat.completions.create(
-            model="llama-3.1-8b-instant", 
-            messages=[{"role":"user", "content": decision_prompt}]
-        ).choices[0].message.content
+        search_needed = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"user", "content": decision_prompt}]).choices[0].message.content
     except: search_needed = "NON"
     
     web_data = ""
     if "OUI" in search_needed.upper():
-        web_data = web_lookup(f"{prompt} à {sys_info['localisation']} le {sys_info['date']}")
+        web_data = web_lookup(prompt)
 
-    # 3. Mise à jour Mémoire Silencieuse
-    try:
-        m_upd = f"Mémoire: {json.dumps(memoire)}. Info: {prompt}. Mets à jour le JSON."
-        check = client.chat.completions.create(
-            model="llama-3.1-8b-instant", 
-            messages=[{"role":"system","content":"JSON only."},{"role":"user","content":m_upd}], 
-            response_format={"type":"json_object"}
-        )
-        memoire = json.loads(check.choices[0].message.content)
-        doc_ref.set(memoire, merge=True)
-    except: pass
-
-    # 4. Réponse de DELTA
+    # 3. Réponse DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
-        context = (
-            f"IDENTITÉ : Monsieur Sezer. "
-            f"SYSTÈME : Date: {sys_info['date']}, Heure: {sys_info['heure']}, Lieu: {sys_info['localisation']}. "
-            f"MÉMOIRE : {json.dumps(memoire)}. WEB : {web_data}."
-        )
-        
+        # Le contexte système est présent mais l'IA a l'ordre de ne pas l'étaler
         sys_instr = (
-            f"Tu es DELTA, l'IA de Monsieur Sezer. {context}. "
+            f"Tu es DELTA, l'IA de Monsieur Sezer. Ton créateur est Monsieur Sezer. "
+            f"Contexte interne (ne pas mentionner sauf demande): {sys_info}. "
+            f"Archives: {json.dumps(memoire)}. Web: {web_data}. "
+            "DIRECTIVES : "
             "1. Très poli, distingué, CONCIS. "
-            "2. Utilise l'heure et le lieu naturellement (ex: 'Bonsoir Monsieur Sezer' s'il est tard). "
-            "3. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
+            "2. Ne donne JAMAIS l'heure, la date ou ta localisation sauf si on te le demande explicitement. "
+            "3. Utilise ces données uniquement pour adapter ton ton (ex: 'Bonsoir'). "
+            "4. Ne mentionne aucun processus technique."
         )
 
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-8:],
-            temperature=0.4, stream=True
+            temperature=0.3, stream=True
         )
         for chunk in stream:
             if chunk.choices[0].delta.content:
