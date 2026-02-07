@@ -48,7 +48,7 @@ if not st.session_state.auth:
         
         code_confirm = ""
         if remember:
-            code_confirm = st.text_input("Code de confirmation 2FA", type="password")
+            code_confirm = st.text_input("Code de confirmation 2FA", type="password", key="confirm_code")
             
         if st.button("Lancer DELTA"):
             if code == CODE_ACCES:
@@ -67,9 +67,17 @@ if not st.session_state.auth:
                 st.error("Code d'accès invalide.")
     st.stop()
 
-# --- 3. CHARGEMENT MÉMOIRE ---
+# --- 3. CHARGEMENT MÉMOIRE & LOGOUT ---
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
+
+# Barre latérale pour la déconnexion
+with st.sidebar:
+    if st.button("🔴 Verrouiller l'unité"):
+        st_javascript("localStorage.removeItem('delta_key');")
+        st.session_state.auth = False
+        st.session_state.can_view_archives = False
+        st.rerun()
 
 # --- 4. INTERFACE ---
 st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
@@ -85,7 +93,7 @@ if prompt := st.chat_input("Commandes..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Commande Archive (Auto-détection)
+    # Commande Archive
     if "archive" in prompt.lower():
         if st.session_state.can_view_archives:
             with st.chat_message("assistant"):
@@ -93,15 +101,14 @@ if prompt := st.chat_input("Commandes..."):
                 for section, items in archives.items():
                     with st.expander(f"📁 {section}"):
                         for item in items: st.write(f"• {item}")
-            st.session_state.messages.append({"role": "assistant", "content": "[Archives consultées]"})
         else:
             with st.chat_message("assistant"):
-                st.warning("Accès restreint : Les archives ne sont pas disponibles en mode invité.")
+                st.warning("Accès restreint aux archives.")
         st.stop()
 
-    # Archivage automatique par sections
+    # Archivage automatique
     sys_analyse = (f"Archives : {archives}. Si Monsieur Sezer donne une info, "
-                   "réponds en JSON : {'action':'add', 'cat':'NOM_SECTION', 'val':'INFO'}.")
+                   "réponds en JSON : {'action':'add', 'cat':'SECTION', 'val':'INFO'}.")
     try:
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
@@ -117,16 +124,12 @@ if prompt := st.chat_input("Commandes..."):
                     if c not in archives: archives[c] = []
                     archives[c].append(v)
                     doc_ref.set({"archives": archives})
-                    st.toast(f"💾 {c} mis à jour")
+                    st.toast("💾")
     except: pass
 
     # Réponse DELTA
     with st.chat_message("assistant"):
-        instruction_delta = (
-            f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
-            f"Mémoire : {archives}. Sois bref et technique. "
-            "Ne dis jamais 'système opérationnel'."
-        )
+        instruction_delta = f"Tu es DELTA. Créateur : Monsieur Sezer Boran. Mémoire : {archives}. Bref."
         placeholder = st.empty()
         full_response = ""
         try:
@@ -141,5 +144,5 @@ if prompt := st.chat_input("Commandes..."):
                     placeholder.markdown(full_response + "▌")
             placeholder.markdown(full_response)
         except:
-            placeholder.markdown("Erreur critique de liaison.")
+            placeholder.markdown("Erreur.")
         st.session_state.messages.append({"role": "assistant", "content": full_response})
