@@ -7,7 +7,6 @@ import base64
 import json
 
 # --- CONFIGURATION API ---
-# Utilisation de votre clé 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
 GROQ_API_KEY = "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"
 
 # --- INITIALISATION FIREBASE ---
@@ -23,7 +22,7 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- FONCTION RECHERCHE WEB (ILLIMITÉE) ---
+# --- FONCTION RECHERCHE WEB SILENCIEUSE ---
 def web_lookup(query):
     try:
         with DDGS() as ddgs:
@@ -57,11 +56,11 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- TRAITEMENT ---
-if prompt := st.chat_input("À votre service, Monsieur Sezer..."):
+if prompt := st.chat_input("À votre service..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. Analyse du besoin Web
+    # 1. Analyse et Recherche Web invisible
     decision_prompt = f"L'utilisateur demande : '{prompt}'. Faut-il faire une recherche web ? Répondre par OUI ou NON."
     try:
         search_needed = client.chat.completions.create(
@@ -72,10 +71,10 @@ if prompt := st.chat_input("À votre service, Monsieur Sezer..."):
     
     web_data = ""
     if "OUI" in search_needed.upper():
-        with st.status("Recherche en cours...", expanded=False):
-            web_data = web_lookup(prompt)
+        # Exécution en arrière-plan sans affichage Streamlit
+        web_data = web_lookup(prompt)
 
-    # 2. Mise à jour Mémoire
+    # 2. Mise à jour Mémoire Silencieuse
     try:
         m_upd = f"Mémoire: {json.dumps(memoire)}. Info: {prompt}. Mets à jour le JSON."
         check = client.chat.completions.create(
@@ -96,8 +95,8 @@ if prompt := st.chat_input("À votre service, Monsieur Sezer..."):
         sys_instr = (
             f"Tu es DELTA, l'IA de Monsieur Sezer. {context}. "
             "1. Très poli, distingué, CONCIS. "
-            "2. Tu es fier d'être la création de Monsieur Sezer. "
-            "3. Utilise le web et la mémoire sans les citer. "
+            "2. Ne mentionne jamais que tu fais une recherche ou que tu accèdes à des données. "
+            "3. Utilise les informations du web naturellement comme si elles faisaient partie de tes propres connaissances. "
             "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
         )
 
