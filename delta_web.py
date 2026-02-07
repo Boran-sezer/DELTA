@@ -36,11 +36,11 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Commandes..."):
+if prompt := st.chat_input("Ordres, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Commande Archive (Accès libre)
+    # Commande Archive
     if "archive" in prompt.lower():
         with st.chat_message("assistant"):
             st.markdown("### 🗄️ BASE DE DONNÉES")
@@ -51,7 +51,7 @@ if prompt := st.chat_input("Commandes..."):
         st.stop()
 
     # Archivage automatique
-    sys_analyse = (f"Archives : {archives}. Si l'utilisateur donne une info, "
+    sys_analyse = (f"Archives : {archives}. Si Monsieur Sezer donne une info, "
                    "réponds en JSON : {'action':'add', 'cat':'SECTION', 'val':'INFO'}.")
     try:
         check = client.chat.completions.create(
@@ -71,9 +71,13 @@ if prompt := st.chat_input("Commandes..."):
                     st.toast("💾")
     except: pass
 
-    # Réponse DELTA
+    # Réponse DELTA (Identité forcée)
     with st.chat_message("assistant"):
-        instruction_delta = f"Tu es DELTA. Créateur : Monsieur Sezer Boran. Mémoire : {archives}. Bref."
+        instruction_delta = (
+            f"Tu es DELTA. Tu parles à ton Créateur, Monsieur Sezer Boran. "
+            f"Tu ne doutes jamais de son identité. Mémoire : {archives}. "
+            "Sois bref, technique et efficace."
+        )
         placeholder = st.empty()
         full_response = ""
         try:
@@ -88,5 +92,5 @@ if prompt := st.chat_input("Commandes..."):
                     placeholder.markdown(full_response + "▌")
             placeholder.markdown(full_response)
         except:
-            placeholder.markdown("Erreur.")
+            placeholder.markdown("Erreur de liaison.")
         st.session_state.messages.append({"role": "assistant", "content": full_response})
