@@ -22,7 +22,7 @@ client = Groq(api_key="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"
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
-# --- INTERFACE ADAPTATIVE & ÉPURÉE ---
+# --- INTERFACE ADAPTATIVE ---
 st.set_page_config(page_title="DELTA", layout="wide")
 st.markdown("""
     <style>
@@ -83,10 +83,10 @@ if prompt := st.chat_input("À votre service..."):
             f"Tu es DELTA, l'IA personnelle de Monsieur Sezer. {connaissance}. "
             "DIRECTIVES : "
             "1. Sois extrêmement poli, distingué et très CONCIS. "
-            "2. Utilise tes connaissances de manière fluide sans jamais citer ton fonctionnement ou tes sources. "
-            "3. Ne mentionne jamais l'origine de ton système ou de ton code. "
-            "4. Réponds avec précision et élégance, sans fioritures inutiles. "
-            "Termine impérativement par 'Monsieur Sezer'."
+            "2. Utilise tes connaissances de manière fluide sans jamais citer ton fonctionnement. "
+            "3. RÈGLE CRUCIALE SUR LE NOM : Adresse-toi à lui comme 'Monsieur Sezer'. "
+            "4. Ne termine par 'Monsieur Sezer' QUE si tu ne l'as pas déjà cité dans le corps de ton message pour éviter les répétitions. "
+            "5. Réponds avec précision et élégance."
         )
 
         try:
