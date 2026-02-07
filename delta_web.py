@@ -24,7 +24,7 @@ archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
 st.set_page_config(page_title="DELTA CORE", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : CORE SYSTEM</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA SYSTEM</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: st.session_state.messages = []
 for m in st.session_state.messages:
@@ -35,37 +35,41 @@ if prompt := st.chat_input("Ordres directs..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # A. ARCHIVAGE ULTRA-SIMPLE (Invisible)
+    # A. ARCHIVAGE SILENCIEUX (Invisible & Précis)
     try:
-        # On demande juste la modif, pas tout le dictionnaire
-        task = f"Infos actuelles: {archives}. Nouveau message: {prompt}. Si info importante, donne UNIQUEMENT un JSON avec la clé 'update' (ex: {{'update': {{'CAT': 'INFO'}}}}). Sinon {{}}."
+        # On force l'IA à être très stricte sur l'identité
+        task = f"Archives: {archives}. User: {prompt}. Extrais uniquement l'info capitale en JSON {{'CAT': 'VAL'}}. Si c'est l'identité, sois précis : Prénom = Boran, Nom = Sezer."
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "system", "content": "Tu es un extracteur de données strict."}, {"role": "user", "content": task}],
+            messages=[{"role": "system", "content": "Tu es un extracteur de données chirurgical."}, {"role": "user", "content": task}],
             response_format={"type": "json_object"}
         )
         data = json.loads(check.choices[0].message.content)
-        if "update" in data:
-            for cat, val in data["update"].items():
+        if data:
+            for cat, val in data.items():
                 if cat not in archives: archives[cat] = []
                 if val not in archives[cat]: archives[cat].append(val)
             doc_ref.set({"archives": archives})
-            st.toast("💾 Mémoire synchronisée")
     except: pass
 
-    # B. RÉPONSE (Priorité Stabilité)
+    # B. RÉPONSE (Zéro message technique)
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
-        # On définit le modèle selon la disponibilité
-        model_to_use = "llama-3.3-70b-versatile"
-        
-        instruction = f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. Voici ce que tu sais de lui: {archives}. Réponds de façon brève, en français, et n'affiche JAMAIS de code JSON."
+        # Consigne de personnalité stricte
+        instruction = (
+            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran (Prénom: Boran, Nom: Sezer). "
+            f"Archives : {archives}. "
+            "INTERDICTION : Ne dis jamais 'Passage en mode léger'. "
+            "INTERDICTION : Ne te trompe pas sur son nom. "
+            "Réponds en français, sois froid, efficace et technique. Pas de politesses inutiles."
+        )
 
         try:
+            # On essaie le modèle puissant
             stream = client.chat.completions.create(
-                model=model_to_use,
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages,
                 stream=True
             )
@@ -75,9 +79,8 @@ if prompt := st.chat_input("Ordres directs..."):
                     full_res += content
                     placeholder.markdown(full_res + "▌")
             placeholder.markdown(full_res)
-        except Exception as e:
-            # Si le gros modèle crash (Rate limit), on bascule sur le petit DIRECTEMENT
-            st.warning("Passage en mode léger (Quota atteint)")
+        except:
+            # Si erreur quota, on passe au petit modèle SILENCIEUSEMENT
             resp = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages
