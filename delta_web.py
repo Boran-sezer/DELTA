@@ -24,7 +24,7 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA AI", layout="wide")
+st.set_page_config(page_title="DELTA AI - Optimized", layout="wide")
 st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
@@ -34,19 +34,20 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Ordres..."):
+if prompt := st.chat_input("En attente de vos ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # --- ARCHIVISTE (DANS UN BLOC SÉPARÉ) ---
+    # --- ARCHIVISTE (MODÈLE LÉGER POUR ÉCONOMISER LE QUOTA) ---
     try:
         sys_analyse = (
             f"Tu es l'unité de gestion de données de Monsieur Sezer Boran. Mémoire : {archives}. "
             f"Dernier message : '{prompt}'. "
             "Réponds UNIQUEMENT avec l'objet JSON complet des archives mis à jour."
         )
+        # On utilise le modèle 8B ici (10x plus de quota disponible)
         check = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", 
+            model="llama-3.1-8b-instant", 
             messages=[{"role": "system", "content": "Moteur JSON."}, {"role": "user", "content": sys_analyse}],
             temperature=0,
             response_format={"type": "json_object"}
@@ -58,31 +59,38 @@ if prompt := st.chat_input("Ordres..."):
             archives = nouvelles_archives
             st.toast("⚙️ Sync")
     except:
-        pass # Si l'archivage échoue, on continue quand même la discussion
+        pass 
 
-    # --- 5. RÉPONSE DE DELTA ---
+    # --- 5. RÉPONSE DE DELTA (MODÈLE PUISSANT) ---
     with st.chat_message("assistant"):
         instruction_delta = (
             f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. "
             f"Connaissances : {archives}. "
-            "Réponds en FRANÇAIS, de manière brève et technique. Ne parle pas de tes archives."
+            "Réponds en FRANÇAIS, bref, technique. Pas de JSON."
         )
         
         placeholder = st.empty()
         full_response = ""
         
-        # Appel simplifié sans trop de paramètres
-        stream = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", 
-            messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
-            stream=True
-        )
+        try:
+            # On garde le 70B ici pour la qualité de la réponse
+            stream = client.chat.completions.create(
+                model="llama-3.3-70b-versatile", 
+                messages=[{"role": "system", "content": instruction_delta}] + st.session_state.messages,
+                stream=True
+            )
+            
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    full_response += content
+                    placeholder.markdown(full_response + "▌")
+            
+            placeholder.markdown(full_response)
+        except Exception as e:
+            if "rate_limit" in str(e).lower():
+                st.error("⚠️ Quota Groq atteint. DELTA doit se reposer quelques minutes.")
+            else:
+                st.error(f"Erreur : {e}")
         
-        for chunk in stream:
-            content = chunk.choices[0].delta.content
-            if content:
-                full_response += content
-                placeholder.markdown(full_response + "▌")
-        
-        placeholder.markdown(full_response)
         st.session_state.messages.append({"role": "assistant", "content": full_response})
