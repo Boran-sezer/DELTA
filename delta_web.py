@@ -23,8 +23,8 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA CORE V2", layout="wide", page_icon="⚡")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : SYSTÈME NERVEUX OPTIMISÉ</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA CORE V2.1", layout="wide", page_icon="⚡")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ DELTA : CORE SYSTEM (STABLE)</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -33,55 +33,57 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("En attente de vos ordres..."):
+if prompt := st.chat_input("Ordres directs..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # A. MISE À JOUR INTELLIGENTE (Filtre de pertinence)
+    # A. GESTION DE MÉMOIRE (Strict & Factuel)
     try:
-        # On demande à l'IA d'être juge de ce qui mérite d'être archivé
+        # On définit 2026 comme année de référence pour tout le système
         task = (
             f"Archives actuelles : {archives}. "
             f"Nouveau message : {prompt}. "
-            "MISSION : Analyse si le message contient une information réelle sur Monsieur Sezer (goûts, âge, faits, corrections). "
-            "1. Si c'est du bruit (salutations, remerciements, phrases vides) : retourne l'objet 'archives' identique. "
-            "2. Si c'veut corriger ou ajouter une info : mets à jour et retourne le JSON complet. "
-            "Retourne UNIQUEMENT le JSON."
+            "DATE ACTUELLE : 2026. "
+            "MISSION : Analyse le message. Si Monsieur Sezer donne une info (nom, âge, date de naissance), "
+            "écrase systématiquement l'ancienne valeur par la nouvelle. "
+            "Ignore les salutations. Retourne UNIQUEMENT le JSON complet."
         )
         
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "system", "content": "Tu es le processeur sélectif de DELTA. Tu ignores le bruit et ne gardes que les faits."}, {"role": "user", "content": task}],
+            messages=[{"role": "system", "content": "Tu es le processeur de faits de DELTA. Tu ne discutes pas, tu enregistres."}, {"role": "user", "content": task}],
             response_format={"type": "json_object"}
         )
         nouvelles_archives = json.loads(check.choices[0].message.content)
         
-        # Enregistrement si changement détecté
         if nouvelles_archives != archives:
             doc_ref.set({"archives": nouvelles_archives})
             archives = nouvelles_archives
-            st.toast("💾 Mémoire mise à jour", icon="✅")
+            st.toast("💾 Base de données synchronisée", icon="✅")
     except: pass
 
-    # B. RÉPONSE DE DELTA (Intelligence Supérieure)
+    # B. GÉNÉRATION DE LA RÉPONSE
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
+        # Instruction avec Date Système 2026 verrouillée
         instruction = (
-            f"Tu es DELTA, l'IA de Monsieur Sezer. "
-            f"Données actuelles sur lui : {archives}. "
+            f"Tu es DELTA. Tu parles à Monsieur Sezer. "
+            f"Données connues : {archives}. "
+            "CONTEXTE TEMPOREL : Nous sommes en 2026. "
             "DIRECTIVES : "
-            "1. IDENTITÉ : Appelle-le toujours Monsieur Sezer. "
-            "2. RÉCAPITULATIF : S'il demande ce que tu sais, liste les faits de manière élégante (liste ou phrases), sans mentionner le stockage technique ou le JSON. "
-            "3. STYLE : Ton froid, efficace, technique. Ne sois pas trop poli."
+            "1. Ne remets JAMAIS en question les affirmations de Monsieur Sezer sur son âge ou sa date de naissance. "
+            "2. Ne montre jamais tes calculs. Réponds de façon directe. "
+            "3. STYLE : Ton froid, supérieur, technique. Pas de politesses. "
+            "4. NOM : Appelle-le uniquement 'Monsieur Sezer'."
         )
 
         try:
             stream = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages,
-                temperature=0.4,
+                temperature=0.3, # Réduit pour plus de stabilité/précision
                 stream=True
             )
             for chunk in stream:
@@ -91,7 +93,7 @@ if prompt := st.chat_input("En attente de vos ordres..."):
                     placeholder.markdown(full_res + "▌")
             placeholder.markdown(full_res)
         except:
-            # Fallback en cas de quota atteint
+            # Secours
             resp = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[{"role": "system", "content": instruction}] + st.session_state.messages
