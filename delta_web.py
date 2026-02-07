@@ -24,8 +24,8 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA AI - Structuration", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : ARCHIVAGE COMPARTIMENTÉ</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA AI - Silencieux", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -34,46 +34,45 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Ordres, Monsieur Sezer..."):
+if prompt := st.chat_input("Ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # --- ANALYSEUR DE STRUCTURE (FORCE LE RANGEMENT) ---
+    # --- ARCHIVISTE SILENCIEUX ---
     sys_analyse = (
-        f"Tu es l'architecte de données de Monsieur Sezer Boran. Mémoire actuelle : {archives}. "
+        f"Tu es l'unité de gestion de données de Monsieur Sezer Boran. Mémoire : {archives}. "
         f"Dernier message : '{prompt}'. "
-        "MISSION : Analyse l'info et range-la de manière LOGIQUE. "
-        "Tu DOIS créer ou utiliser des catégories spécifiques (ex: IDENTITÉ, TECHNIQUE, PROJETS, PRÉFÉRENCES). "
-        "Interdiction de tout mettre dans une seule section. "
-        "Réponds EXCLUSIVEMENT avec l'objet JSON complet des archives. "
-        "Si l'info est déjà présente ou inutile, réponds par le JSON actuel sans changement."
+        "MISSION : Analyse et range l'info par catégories (IDENTITÉ, TECHNIQUE, etc.). "
+        "Réponds EXCLUSIVEMENT avec l'objet JSON complet des archives mis à jour. "
+        "Si l'info est déjà là, renvoie le JSON actuel."
     )
     
     try:
         check = client.chat.completions.create(
             model="llama-3.3-70b-versatile", 
-            messages=[{"role": "system", "content": "Expert en taxonomie et structuration JSON."}, {"role": "user", "content": sys_analyse}],
-            temperature=0.1,
+            messages=[{"role": "system", "content": "Moteur JSON discret."}, {"role": "user", "content": sys_analyse}],
+            temperature=0,
             response_format={"type": "json_object"}
         )
         verdict = check.choices[0].message.content
-        
         json_match = re.search(r'\{.*\}', verdict, re.DOTALL)
         if json_match:
             nouvelles_archives = json.loads(json_match.group(0))
             if nouvelles_archives != archives:
                 doc_ref.set({"archives": nouvelles_archives})
                 archives = nouvelles_archives
-                st.toast("📁 Archives triées et synchronisées")
-    except Exception as e:
-        st.error(f"Erreur de tri : {e}")
+                # Petit indicateur discret dans l'interface, pas dans le chat
+                st.toast("⚙️ Sync") 
+    except: pass
 
-    # --- 5. RÉPONSE DE DELTA ---
+    # --- 5. RÉPONSE DE DELTA (INTERDICTION DE PARLER DES ARCHIVES) ---
     with st.chat_message("assistant"):
         instruction_delta = (
-            f"Tu es DELTA. Tu parles à ton Créateur, Monsieur Sezer Boran. "
-            f"Base de données structurée : {archives}. "
-            "Utilise ces catégories pour personnaliser ta réponse. Sois bref et technique."
+            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. "
+            f"Connaissances : {archives}. "
+            "IMPORTANT : Ne mentionne JAMAIS que tu mets à jour les archives ou que tu crées des catégories. "
+            "Contente-toi de répondre à l'utilisateur de manière brève et technique. "
+            "Agis comme si tu savais déjà tout sans expliquer tes processus internes."
         )
         placeholder = st.empty()
         full_response = ""
@@ -88,5 +87,5 @@ if prompt := st.chat_input("Ordres, Monsieur Sezer..."):
                     full_response += chunk.choices[0].delta.content
                     placeholder.markdown(full_response + "▌")
             placeholder.markdown(full_response)
-        except: placeholder.markdown("Erreur de liaison.")
+        except: placeholder.markdown("Erreur.")
         st.session_state.messages.append({"role": "assistant", "content": full_response})
