@@ -24,8 +24,8 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA AI - Autonome", layout="wide")
-st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : MODE AUTONOME</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="DELTA AI - Haute Précision", layout="wide")
+st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA : ARCHIVAGE CRITIQUE</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
     st.session_state.messages = []
@@ -34,46 +34,46 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- 4. LOGIQUE DE TRAITEMENT ---
-if prompt := st.chat_input("Dites n'importe quoi, Monsieur Sezer..."):
+if prompt := st.chat_input("Transmettez vos données, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # --- CYCLE DE PENSÉE AUTONOME (INVISIBLE) ---
-    # DELTA décide seul s'il doit modifier sa mémoire
+    # --- ANALYSEUR HAUTE PERFORMANCE (INVISIBLE) ---
     sys_analyse = (
-        f"Tu es le cerveau autonome de Monsieur Sezer. Voici ta mémoire actuelle : {archives}. "
-        f"Il vient de dire : '{prompt}'. "
-        "Si ce message contient une info utile, une correction d'un fait ancien ou une demande de suppression implicite, "
-        "réponds UNIQUEMENT avec l'objet JSON complet et mis à jour de la mémoire. "
-        "Sois proactif : crée des sections, reformule proprement, et supprime les contradictions. "
-        "Si rien ne mérite d'être changé, réponds exactement par le mot : IGNORE."
+        f"Tu es le centre de données de Monsieur Sezer. Mémoire actuelle : {archives}. "
+        f"Dernier message : '{prompt}'. "
+        "MISSION : Identifie CHAQUE information cruciale (technique, personnelle, projet, préférence). "
+        "Ne jette rien d'important. Reformule pour que ce soit clair et professionnel. "
+        "Réorganise les sections si nécessaire. "
+        "Réponds EXCLUSIVEMENT avec l'objet JSON complet mis à jour. "
+        "Si absolument rien de nouveau ou d'utile n'est détecté, réponds : IGNORE."
     )
     
     try:
+        # Utilisation du modèle 70B pour l'analyse de mémoire
         check = client.chat.completions.create(
             model="llama-3.3-70b-versatile", 
-            messages=[{"role": "system", "content": "Tu es une mémoire vive autonome."}, {"role": "user", "content": sys_analyse}],
+            messages=[{"role": "system", "content": "Tu es un expert en gestion de données stratégiques."}, {"role": "user", "content": sys_analyse}],
             temperature=0
         )
         verdict = check.choices[0].message.content.strip()
         
         if verdict != "IGNORE":
-            # Extraction du JSON au cas où l'IA ajoute du texte par erreur
             match = re.search(r'\{.*\}', verdict, re.DOTALL)
             if match:
                 nouvelles_archives = json.loads(match.group(0))
                 if nouvelles_archives != archives:
                     archives = nouvelles_archives
                     doc_ref.set({"archives": archives})
-                    st.toast("🧠 Mémoire auto-mise à jour")
+                    st.toast("⚙️ Données critiques archivées")
     except: pass
 
     # --- 5. RÉPONSE DE DELTA ---
     with st.chat_message("assistant"):
         instruction_delta = (
-            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. "
-            f"Connaissances actuelles : {archives}. "
-            "Réponds de manière technique et concise. Ne mentionne pas que tu mets à jour ta mémoire sauf si on te le demande."
+            f"Tu es DELTA. Créateur : Monsieur Sezer Boran. "
+            f"Données mémorisées : {archives}. "
+            "Sois ultra-précis, technique et efficace. Utilise les archives pour chaque réponse."
         )
         placeholder = st.empty()
         full_response = ""
@@ -88,5 +88,5 @@ if prompt := st.chat_input("Dites n'importe quoi, Monsieur Sezer..."):
                     full_response += chunk.choices[0].delta.content
                     placeholder.markdown(full_response + "▌")
             placeholder.markdown(full_response)
-        except: placeholder.markdown("Erreur de liaison.")
+        except: placeholder.markdown("Erreur.")
         st.session_state.messages.append({"role": "assistant", "content": full_response})
