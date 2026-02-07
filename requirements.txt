@@ -2,3 +2,4 @@ streamlit
 groq
 firebase-admin
 streamlit-javascript
+duckduckgo-search
