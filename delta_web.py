@@ -24,9 +24,17 @@ client = Groq(api_key="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"
 res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
-# --- INTERFACE ---
+# --- INTERFACE BLANCHE ET SOBRE ---
 st.set_page_config(page_title="DELTA", layout="wide")
-st.markdown("<style>.stApp { background: #050a0f; color: #e0e0e0; } button { display: none; }</style>", unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    .stApp { background: #ffffff; color: #1a1a1a; }
+    .stChatMessage { background-color: #f7f7f8; border-radius: 10px; border: 1px solid #e5e5e5; margin-bottom: 10px; }
+    button { display: none; }
+    .stChatInputContainer { background: #ffffff !important; border-top: 1px solid #eeeeee; }
+    p { color: #1a1a1a !important; font-family: 'Inter', sans-serif; }
+    </style>
+""", unsafe_allow_html=True)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -41,7 +49,7 @@ if prompt := st.chat_input(""):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Mise à jour mémoire (Silencieuse via 8B)
+    # Mise à jour mémoire
     try:
         task = f"Archives: {archives}. Info: {prompt}. Update JSON."
         check = client.chat.completions.create(
@@ -55,7 +63,7 @@ if prompt := st.chat_input(""):
             archives = nouvelles_archives
     except: pass
 
-    # Réponse DELTA (70B)
+    # Réponse DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
