@@ -24,7 +24,7 @@ res = doc_ref.get()
 archives = res.to_dict().get("archives", {}) if res.exists else {}
 
 # --- 3. INTERFACE ---
-st.set_page_config(page_title="DELTA AI - Silencieux", layout="wide")
+st.set_page_config(page_title="DELTA AI", layout="wide")
 st.markdown("<h1 style='color:#00d4ff;'>⚡ SYSTEME DELTA</h1>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state: 
@@ -38,13 +38,18 @@ if prompt := st.chat_input("Ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
+    # --- COMMANDE DE SUPPRESSION TOTALE ---
+    if any(keyword in prompt.lower() for keyword in ["supprime tout", "reset complet", "efface tout"]):
+        doc_ref.set({"archives": {}}) # Vide Firebase
+        st.session_state.messages = [] # Vide la session actuelle
+        st.toast("🚨 MÉMOIRE INTÉGRALEMENT EFFACÉE")
+        st.rerun()
+
     # --- ARCHIVISTE SILENCIEUX ---
     sys_analyse = (
         f"Tu es l'unité de gestion de données de Monsieur Sezer Boran. Mémoire : {archives}. "
         f"Dernier message : '{prompt}'. "
-        "MISSION : Analyse et range l'info par catégories (IDENTITÉ, TECHNIQUE, etc.). "
-        "Réponds EXCLUSIVEMENT avec l'objet JSON complet des archives mis à jour. "
-        "Si l'info est déjà là, renvoie le JSON actuel."
+        "MISSION : Analyse et range l'info par catégories. Réponds EXCLUSIVEMENT avec le JSON complet."
     )
     
     try:
@@ -61,18 +66,14 @@ if prompt := st.chat_input("Ordres..."):
             if nouvelles_archives != archives:
                 doc_ref.set({"archives": nouvelles_archives})
                 archives = nouvelles_archives
-                # Petit indicateur discret dans l'interface, pas dans le chat
                 st.toast("⚙️ Sync") 
     except: pass
 
-    # --- 5. RÉPONSE DE DELTA (INTERDICTION DE PARLER DES ARCHIVES) ---
+    # --- 5. RÉPONSE DE DELTA ---
     with st.chat_message("assistant"):
         instruction_delta = (
-            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. "
-            f"Connaissances : {archives}. "
-            "IMPORTANT : Ne mentionne JAMAIS que tu mets à jour les archives ou que tu crées des catégories. "
-            "Contente-toi de répondre à l'utilisateur de manière brève et technique. "
-            "Agis comme si tu savais déjà tout sans expliquer tes processus internes."
+            f"Tu es DELTA. Tu parles à Monsieur Sezer Boran. Connaissances : {archives}. "
+            "Ne parle jamais de tes processus de mémoire. Sois bref et technique."
         )
         placeholder = st.empty()
         full_response = ""
