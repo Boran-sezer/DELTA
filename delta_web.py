@@ -5,7 +5,7 @@ from firebase_admin import credentials, firestore
 import base64, json, hashlib
 from datetime import datetime, timedelta
 
-# --- INITIALISATION FIREBASE SÉCURISÉE ---
+# --- INITIALISATION FIREBASE ---
 @st.cache_resource
 def init_delta_brain():
     if not firebase_admin._apps:
@@ -18,84 +18,75 @@ def init_delta_brain():
             cred = credentials.Certificate(cred_dict)
             return firebase_admin.initialize_app(cred)
         except Exception as e:
-            st.error(f"Erreur d'accès Firebase : {e}")
+            st.error(f"Erreur Firebase : {e}")
             return None
     return firebase_admin.get_app()
 
 app = init_delta_brain()
 db = firestore.client() if app else None
+USER_ID = "monsieur_sezer" # Identifiant unique pour vos données
+
+# --- INITIALISATION GROQ ---
 client = Groq(api_key="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")
 
-# --- MOTEUR DE RECHERCHE JARVIS ---
-def get_global_context(limit=15):
-    """Récupère les souvenirs les plus importants à travers TOUTES les branches"""
-    if not db: return ""
-    all_mems = []
-    try:
-        # On parcourt les branches (collections principales)
-        branches = db.collection("memory").stream()
-        for branch in branches:
-            docs = db.collection("memory").document(branch.id).collection("souvenirs") \
-                     .order_by("created_at", direction=firestore.Query.DESCENDING).limit(5).stream()
-            for d in docs:
-                data = d.to_dict()
-                all_mems.append(f"[{branch.id}] {data.get('content')}")
-        
-        return "\n".join(all_mems[-limit:])
-    except:
-        return "Aucun souvenir accessible."
-
+# --- UTILITAIRES ---
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-def identify_branch(text: str) -> str:
-    """Demande à l'IA de classer l'info dans une branche"""
+def get_memories(limit=30):
+    """Récupère les souvenirs directement dans la collection de l'utilisateur"""
+    if not db: return []
     try:
-        analysis = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Tu es Jarvis. Donne uniquement un nom de catégorie (ex: Famille, Travail, Identité)."},
-                      {"role": "user", "content": text}]
-        )
-        name = analysis.choices[0].message.content.strip().replace(" ", "_")
-        return name if len(name) < 20 else "Général"
-    except:
-        return "Général"
+        # Chemin direct et simplifié pour éviter les erreurs de lecture
+        docs = db.collection("users").document(USER_ID).collection("memory") \
+                 .order_by("created_at", direction=firestore.Query.DESCENDING) \
+                 .limit(limit).stream()
+        return [d.to_dict() for d in docs]
+    except Exception as e:
+        return []
 
-# --- INTERFACE ÉPURÉE ---
+def summarize_context(memories, max_chars=600):
+    if not memories: return "Aucun souvenir."
+    lines = [f"- {m.get('content')}" for m in memories]
+    return "\n".join(lines)[:max_chars]
+
+# --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("<style>[data-testid='stSidebar'], header {display: none !important;}</style>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Système opérationnel. À vos ordres, Monsieur Sezer."}]
+    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres, Monsieur Sezer. Système de mémoire actif."}]
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- ACTION ---
-if prompt := st.chat_input("Ordre direct..."):
+# --- PROCESSUS ---
+if prompt := st.chat_input("Commandez Jarvis..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. Analyse automatique du besoin de mémorisation
-    if len(prompt) > 10:
-        branch = identify_branch(prompt)
+    # 1. ÉCRITURE DANS FIREBASE (Correction du chemin)
+    if db and len(prompt) > 5:
         doc_hash = hash_text(prompt)
         try:
-            db.collection("memory").document(branch).collection("souvenirs").document(doc_hash).set({
+            # On écrit dans : users / monsieur_sezer / memory / [HASH]
+            db.collection("users").document(USER_ID).collection("memory").document(doc_hash).set({
                 "content": prompt,
                 "created_at": datetime.utcnow(),
                 "priority": "medium"
             }, merge=True)
-        except: pass
+        except Exception as e:
+            st.error(f"Erreur d'écriture : {e}")
 
-    # 2. Récupération de la mémoire pour la réponse
+    # 2. RÉPONSE AVEC CONTEXTE
     with st.chat_message("assistant"):
-        # Jarvis lit maintenant dans TOUTE la base avant de répondre
-        full_memory = get_global_context()
+        memories = get_memories()
+        ctx = summarize_context(memories)
+        
         sys_instr = (
             f"Tu es Jarvis. Ton créateur est Monsieur Sezer. "
-            f"Voici tes archives actuelles :\n{full_memory}\n"
-            "Utilise ces infos pour répondre. Sois bref, intelligent et fidèle à tes souvenirs."
+            f"Contexte de tes archives : {ctx}. "
+            "Réponds de façon concise et intelligente."
         )
         
         try:
@@ -106,6 +97,6 @@ if prompt := st.chat_input("Ordre direct..."):
             st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
         except:
-            st.error("Liaison interrompue.")
+            st.error("Erreur de connexion Groq.")
 
     st.rerun()
