@@ -18,22 +18,8 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# --- INITIALISATION GROQ (BLINDÉE) ---
-def get_groq_client():
-    # Test format 1: GROQ_API_KEY = "..."
-    if "GROQ_API_KEY" in st.secrets:
-        return Groq(api_key=st.secrets["GROQ_API_KEY"])
-    # Test format 2: [groq] \n api_key = "..."
-    if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
-        return Groq(api_key=st.secrets["groq"]["api_key"])
-    return None
-
-client = get_groq_client()
-
-if not client:
-    st.error("❌ Clé Groq introuvable dans les Secrets.")
-    st.info("Vérifiez que vous avez bien écrit : GROQ_API_KEY = 'votre_cle' dans Settings > Secrets")
-    st.stop()
+# --- INITIALISATION GROQ (Nouvelle clé) ---
+client = Groq(api_key="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")
 
 USER_ID = "monsieur_sezer"
 
@@ -58,7 +44,7 @@ except Exception:
     context_list = []
 
 with st.sidebar:
-    st.header("🧠 Mémoire Vive")
+    st.header("🧠 Mémoire Vive (Hash)")
     for m in context_list:
         st.caption(f"[{m.get('category')}] {m.get('content')}")
     if st.button("🔄 Actualiser"):
@@ -71,19 +57,19 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 # --- PROCESSUS ---
-if prompt := st.chat_input("Ordre direct..."):
+if prompt := st.chat_input("En attente de vos ordres, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. MÉMOIRE HASH
+    # 1. ANALYSE ET STOCKAGE (JSON)
     if is_memory_worthy(prompt):
         m_hash = hash_text(prompt)
         try:
             analysis = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
-                    {"role": "system", "content": "Tu es une IA forte. Catégorise en JSON: {'category': '...'} "},
-                    {"role": "user", "content": f"Catégorie pour : {prompt}"}
+                    {"role": "system", "content": "Tu es une IA forte. Catégorise en JSON : {'category': '...'} "},
+                    {"role": "user", "content": f"Donne une catégorie courte pour : {prompt}"}
                 ],
                 response_format={"type": "json_object"}
             )
@@ -103,7 +89,11 @@ if prompt := st.chat_input("Ordre direct..."):
     # 2. RÉPONSE JARVIS
     with st.chat_message("assistant"):
         context_str = "\n".join([f"- {m['content']}" for m in context_list])
-        sys_instr = f"Tu es Jarvis. Créateur: Monsieur Sezer. Contexte: {context_str}. Sois concis."
+        sys_instr = (
+            f"Tu es Jarvis, l'IA de Monsieur Sezer. "
+            f"Tes souvenirs récents sont : {context_str}. "
+            "Sois concis, brillant et direct. Ne mentionne pas que tu es une IA."
+        )
         
         try:
             response = client.chat.completions.create(
