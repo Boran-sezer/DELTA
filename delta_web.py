@@ -15,67 +15,80 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"Erreur d'accès : {e}")
+        st.error(f"Erreur d'accès aux serveurs : {e}")
 
 db = firestore.client()
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- CHARGEMENT DES ARCHIVES ---
-res = doc_ref.get()
-archives = res.to_dict() if res.exists else {
-    "profil": {"nom": "Monsieur Sezer"},
-    "projets": {},
-    "preferences": {}
-}
+# --- CHARGEMENT IMMÉDIAT (Pour être prêt dès l'ouverture) ---
+def charger_memoire():
+    res = doc_ref.get()
+    if res.exists:
+        return res.to_dict()
+    # Structure initiale si vide
+    initial = {"profil": {"nom": "Monsieur Sezer", "role": "Créateur"}, "projets": {}, "preferences": {}}
+    doc_ref.set(initial)
+    return initial
 
-# --- INTERFACE ---
-st.set_page_config(page_title="DELTA", page_icon="🤖")
-st.title("DELTA - Interface Terminal")
+archives = charger_memoire()
+
+# --- INTERFACE STYLE TERMINAL ---
+st.set_page_config(page_title="DELTA", page_icon="🦾")
+st.markdown("<style>#MainMenu, footer, header {visibility:hidden;} .stChatFloatingInputContainer {padding-bottom: 20px;}</style>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state:
+    # DELTA sait qui vous êtes dès le premier message interne
     st.session_state.messages = []
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- TRAITEMENT DES FLUX ---
+# --- MOTEUR DE TRAITEMENT ---
 if prompt := st.chat_input("En attente d'ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. ANALYSE SYNAPTIQUE (Extraction / Suppression)
+    # 1. TRIEUR INTELLIGENT (Logique Lux)
     filtre_prompt = (
-        f"ANALYSE : '{prompt}'. ARCHIVES : {json.dumps(archives)}. "
-        "SI SUPPRESSION : Réponds {'action': 'delete', 'target': 'catégorie', 'key': 'clé'}. "
-        "SI NOUVELLE INFO : Réponds le JSON structuré. "
-        "SINON : Réponds 'STABLE'."
+        f"ARCHIVES ACTUELLES : {json.dumps(archives)}\n"
+        f"ORDRE : '{prompt}'\n"
+        "MISSION : Analyse si l'ordre contient une info à mémoriser ou à supprimer.\n"
+        "RETOURNE UNIQUEMENT UN JSON :\n"
+        "- Pour mémoriser : {'update': {'categorie': {'clé': 'valeur'}}}\n"
+        "- Pour supprimer : {'delete': {'categorie': 'clé'}}\n"
+        "- Sinon : {}"
     )
     
-    analysis = client.chat.completions.create(
+    analyse = client.chat.completions.create(
         model="llama-3.1-8b-instant",
-        messages=[{"role": "system", "content": "Extracteur JSON strict."},
+        messages=[{"role": "system", "content": "Tu es le processeur de données de DELTA. JSON pur uniquement."},
                   {"role": "user", "content": filtre_prompt}],
         response_format={"type": "json_object"}
     ).choices[0].message.content
 
     try:
-        cmd = json.loads(analysis)
-        if cmd.get("action") == "delete":
-            target, key = cmd.get("target"), cmd.get("key")
-            doc_ref.update({f"{target}.{key}": firestore.DELETE_FIELD})
-            st.toast(f"Protocole d'effacement terminé : {key}")
-        elif cmd != {}:
-            doc_ref.set(cmd, merge=True)
-            st.toast("Archives mises à jour.")
+        cmd = json.loads(analyse)
+        if "delete" in cmd:
+            cat, key = list(cmd["delete"].items())[0]
+            doc_ref.update({f"{cat}.{key}": firestore.DELETE_FIELD})
+            st.toast(f"Protocole d'effacement : {key}")
+        elif "update" in cmd:
+            doc_ref.set(cmd["update"], merge=True)
+            st.toast("Mémoire synchronisée.")
+            # Mise à jour immédiate du dictionnaire local
+            for cat, data in cmd["update"].items():
+                if cat in archives: archives[cat].update(data)
     except: pass
 
-    # 2. RÉPONSE JARVIS
+    # 2. RÉPONSE DE DELTA (Style Jarvis Pur)
     with st.chat_message("assistant"):
         nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
         sys_instr = (
-            f"Tu es DELTA. Créateur : {nom}. ARCHIVES : {json.dumps(archives)}. "
-            "STYLE : Jarvis. Précis, distingué, ultra-concis. Pas de phrases inutiles."
+            f"Tu es DELTA, l'IA de {nom}. Ton créateur est Monsieur Sezer.\n"
+            f"MÉMOIRE : {json.dumps(archives)}\n"
+            "TON : Jarvis. Précis, dévoué, ultra-concis. "
+            "Tu connais parfaitement Monsieur Sezer grâce aux ARCHIVES ci-dessus."
         )
         
         res_ai = client.chat.completions.create(
