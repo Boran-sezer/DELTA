@@ -114,4 +114,4 @@ if prompt := st.chat_input("En attente de vos ordres, Monsieur Sezer..."):
         except Exception as e:
             st.error(f"Erreur Groq : {e}")
 
-    st.experimental_rerun()
+# => supprime st.experimental_rerun()
