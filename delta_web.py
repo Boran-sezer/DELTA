@@ -18,7 +18,7 @@ def init_delta_brain():
             cred = credentials.Certificate(cred_dict)
             return firebase_admin.initialize_app(cred)
         except Exception as e:
-            st.error(f"Erreur d'initialisation : {e}")
+            st.error(f"Erreur Firebase : {e}")
             return None
     return firebase_admin.get_app()
 
@@ -32,27 +32,15 @@ client = Groq(api_key="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"
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-def is_memory_worthy(text: str) -> dict:
-    """Détermine si l'info mérite d'être mémorisée"""
-    blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
-    if len(text.strip()) < 15 or any(word in text.lower() for word in blacklist):
-        return {"is_worthy": False, "priority": "low", "branch": "Memory"}
+def get_memories(branch_name, limit=50):
+    if not db: return []
     try:
-        analysis = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Tu es Jarvis. Réponds en JSON : {'is_worthy': bool, 'priority': 'high|medium|low', 'branch':'nom'}"},
-                {"role": "user", "content": text}
-            ],
-            response_format={"type": "json_object"}
-        )
-        res = json.loads(analysis.choices[0].message.content)
-        # Si LLM propose une branche trop vague ou inutile, mettre "Memory"
-        if not res.get("branch") or res.get("branch").lower() in ["général", "default"]:
-            res["branch"] = "Memory"
-        return res
+        docs = db.collection("memory").document(branch_name).collection("souvenirs") \
+                 .order_by("created_at", direction=firestore.Query.DESCENDING) \
+                 .limit(limit).stream()
+        return [d.to_dict() for d in docs]
     except:
-        return {"is_worthy": False, "priority": "low", "branch": "Memory"}
+        return []
 
 def merge_similar_memories(memories):
     merged = []
@@ -64,11 +52,19 @@ def merge_similar_memories(memories):
         seen_hashes.add(h)
     return merged
 
+def summarize_context(branch_name, max_chars=500):
+    memories = get_memories(branch_name, limit=50)
+    if not memories: return "Aucun souvenir récent."
+    memories = sorted(memories, key=lambda x: {"high":3,"medium":2,"low":1}.get(x.get("priority","medium")), reverse=True)
+    merged = merge_similar_memories(memories)
+    lines = [f"[{m.get('priority')}] {m.get('content')}" for m in merged]
+    return "\n".join(lines)[:max_chars]
+
 def cleanup_old_memories(days=30):
     if not db: return
     cutoff = datetime.utcnow() - timedelta(days=days)
     memory_ref = db.collection("memory")
-    for branch_doc in memory_ref.stream():  # pour chaque branche/personne
+    for branch_doc in memory_ref.stream():
         souvenirs_ref = branch_doc.reference.collection("souvenirs")
         for doc in souvenirs_ref.stream():
             data = doc.to_dict()
@@ -80,23 +76,43 @@ def cleanup_old_memories(days=30):
             if data.get("priority","low")=="low" and created_at < cutoff:
                 souvenirs_ref.document(doc.id).delete()
 
-def get_memories(branch_name, limit=50):
-    if not db: return []
-    try:
-        docs = db.collection("memory").document(branch_name).collection("souvenirs") \
-                 .order_by("created_at", direction=firestore.Query.DESCENDING) \
-                 .limit(limit).stream()
-        return [d.to_dict() for d in docs]
-    except:
-        return []
+def is_memory_worthy(text: str) -> dict:
+    """Optimisé : mémorise tout ce qui est important, fusionne doublons, évite branches inutiles"""
+    blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
+    important_keywords = ["nom", "prénom", "âge", "ville", "surnom", "pseudo", "email"]
 
-def summarize_context(branch_name, max_chars=500):
-    memories = get_memories(branch_name, limit=50)
-    if not memories: return "Aucun souvenir récent."
-    memories = sorted(memories, key=lambda x: {"high":3,"medium":2,"low":1}.get(x.get("priority","medium")), reverse=True)
-    merged = merge_similar_memories(memories)
-    lines = [f"[{m.get('priority')}] {m.get('content')}" for m in merged]
-    return "\n".join(lines)[:max_chars]
+    lower_text = text.lower().strip()
+    
+    # Ignore trivialités
+    if any(word in lower_text for word in blacklist):
+        return {"is_worthy": False, "priority": "low", "branch": "Memory"}
+    
+    # Toujours mémoriser si mot-clé important
+    if any(k in lower_text for k in important_keywords):
+        return {"is_worthy": True, "priority": "high", "branch": "Memory"}
+    
+    # Vérifie si le texte est déjà présent pour éviter doublon
+    existing_memories = get_memories("Memory")
+    for m in existing_memories:
+        if lower_text in m.get("content","").lower():
+            return {"is_worthy": False, "priority": m.get("priority","medium"), "branch": "Memory"}
+    
+    # Sinon LLM décide
+    try:
+        analysis = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "Tu es Jarvis. Réponds en JSON : {'is_worthy': bool, 'priority': 'high|medium|low', 'branch':'nom'}"},
+                {"role": "user", "content": text}
+            ],
+            response_format={"type": "json_object"}
+        )
+        res = json.loads(analysis.choices[0].message.content)
+        if not res.get("branch") or res.get("branch").lower() in ["général","default"]:
+            res["branch"] = "Memory"
+        return res
+    except:
+        return {"is_worthy": True, "priority": "medium", "branch": "Memory"}
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI Ultra", page_icon="🌐", layout="wide")
@@ -117,10 +133,10 @@ if prompt := st.chat_input("Commandez Jarvis..."):
 
     # Analyse mémoire
     mem_analysis = is_memory_worthy(prompt)
-    branch_name = mem_analysis.get("branch", "Memory")  # Branche par défaut = Memory
+    branch_name = mem_analysis.get("branch", "Memory")
     doc_hash = hash_text(prompt)
 
-    # Écriture silencieuse uniquement si info utile
+    # Écriture silencieuse si utile
     if db and mem_analysis.get("is_worthy"):
         try:
             db.collection("memory").document(branch_name).collection("souvenirs").document(doc_hash).set({
