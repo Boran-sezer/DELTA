@@ -32,6 +32,14 @@ client = Groq(api_key="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"
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+def get_branches():
+    """Récupère toutes les branches existantes"""
+    if not db: return []
+    try:
+        return [doc.id for doc in db.collection("memory").stream()]
+    except:
+        return []
+
 def get_memories(branch_name, limit=50):
     if not db: return []
     try:
@@ -43,7 +51,6 @@ def get_memories(branch_name, limit=50):
         return []
 
 def merge_similar_memories(memories):
-    """Fusionne doublons pour ne pas saturer la mémoire"""
     merged = []
     seen_hashes = set()
     for m in memories:
@@ -62,7 +69,6 @@ def summarize_context(branch_name, max_chars=500):
     return "\n".join(lines)[:max_chars]
 
 def cleanup_old_memories(days=30):
-    """Supprime automatiquement les souvenirs low-priority anciens"""
     if not db: return
     cutoff = datetime.utcnow() - timedelta(days=days)
     memory_ref = db.collection("memory")
@@ -78,51 +84,76 @@ def cleanup_old_memories(days=30):
             if data.get("priority","low")=="low" and created_at < cutoff:
                 souvenirs_ref.document(doc.id).delete()
 
-def is_memory_worthy(text: str) -> dict:
-    """Système de tri ultra intelligent"""
-    blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
-    important_keywords = ["nom", "prénom", "âge", "ville", "surnom", "pseudo", "email", "projet", "hobby"]
-
-    lower_text = text.lower().strip()
-    
-    # Ignore trivialités
-    if any(word in lower_text for word in blacklist):
-        return {"is_worthy": False, "priority": "low", "branch": "Memory"}
-    
-    # Toujours mémoriser si mot-clé important
-    if any(k in lower_text for k in important_keywords):
-        return {"is_worthy": True, "priority": "high", "branch": "Memory"}
-    
-    # Vérifie si texte déjà présent → éviter doublon
-    existing_memories = get_memories("Memory")
-    for m in existing_memories:
-        if lower_text in m.get("content","").lower():
-            return {"is_worthy": False, "priority": m.get("priority","medium"), "branch": "Memory"}
-    
-    # Sinon LLM décide avec tri intelligent
+def identify_branch(text: str) -> str:
+    """
+    Détermine la branche adaptée pour cette info.
+    Si info sur une personne existante → sa branche
+    Sinon → crée une nouvelle branche (nom propre détecté) ou Memory par défaut
+    """
+    branches = get_branches()
+    text_lower = text.lower()
+    for branch in branches:
+        # simple heuristique : si le prénom de la branche apparaît dans le texte
+        if branch.lower() in text_lower:
+            return branch
+    # Sinon, s’il contient prénom/nom détectable → nouvelle branche
+    # Exemple simple : si texte contient "mon prénom est Boran" -> crée "Boran"
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "Tu es Jarvis. Réponds en JSON : {'is_worthy': bool, 'priority': 'high|medium|low', 'branch':'nom'}"},
+                {"role": "system", "content": "Tu es Jarvis. Détecte si le texte contient un nom ou une personne. Réponds uniquement par le nom ou 'Memory' si aucun."},
+                {"role": "user", "content": text}
+            ],
+            response_format={"type": "text"}
+        )
+        branch_name = analysis.choices[0].message.content.strip()
+        if not branch_name:
+            branch_name = "Memory"
+        return branch_name
+    except:
+        return "Memory"
+
+def is_memory_worthy(text: str) -> dict:
+    blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
+    important_keywords = ["nom", "prénom", "âge", "ville", "surnom", "pseudo", "email", "projet", "hobby"]
+
+    lower_text = text.lower().strip()
+    if any(word in lower_text for word in blacklist):
+        return {"is_worthy": False, "priority": "low", "branch": "Memory"}
+    if any(k in lower_text for k in important_keywords):
+        return {"is_worthy": True, "priority": "high", "branch": identify_branch(text)}
+
+    # Vérifie si déjà présent
+    branch = identify_branch(text)
+    existing_memories = get_memories(branch)
+    for m in existing_memories:
+        if lower_text in m.get("content","").lower():
+            return {"is_worthy": False, "priority": m.get("priority","medium"), "branch": branch}
+
+    # Sinon LLM décide
+    try:
+        analysis = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "Tu es Jarvis. Décide si l'info mérite d'être mémorisée, et retourne JSON {'is_worthy': bool, 'priority':'high|medium|low', 'branch':'nom'}"},
                 {"role": "user", "content": text}
             ],
             response_format={"type": "json_object"}
         )
         res = json.loads(analysis.choices[0].message.content)
         if not res.get("branch") or res.get("branch").lower() in ["général","default"]:
-            res["branch"] = "Memory"
+            res["branch"] = branch
         return res
     except:
-        # Si erreur LLM → mémoriser par défaut
-        return {"is_worthy": True, "priority": "medium", "branch": "Memory"}
+        return {"is_worthy": True, "priority": "medium", "branch": branch}
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI Ultimate", page_icon="🌐", layout="wide")
-st.title("🌐 DELTA : Jarvis Légendaire")
+st.title("🌐 DELTA : Jarvis Légendaire (Fusion Personnes/Thèmes)")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres. Le système est parfaitement synchronisé."}]
+    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres. Jarvis est synchronisé et prêt."}]
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
@@ -134,12 +165,10 @@ if prompt := st.chat_input("Commandez Jarvis..."):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse mémoire ultra-intelligente
     mem_analysis = is_memory_worthy(prompt)
     branch_name = mem_analysis.get("branch", "Memory")
     doc_hash = hash_text(prompt)
 
-    # Écriture silencieuse uniquement si utile
     if db and mem_analysis.get("is_worthy"):
         try:
             db.collection("memory").document(branch_name).collection("souvenirs").document(doc_hash).set({
@@ -152,9 +181,8 @@ if prompt := st.chat_input("Commandez Jarvis..."):
         except:
             pass
 
-    cleanup_old_memories()  # Nettoyage automatique et intelligent
+    cleanup_old_memories()
 
-    # Réponse Jarvis
     with st.chat_message("assistant"):
         ctx = summarize_context(branch_name)
         sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Réponds de façon ultra pertinente, concise et bluffante."
