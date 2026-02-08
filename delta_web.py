@@ -4,7 +4,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import base64, json
 
-# --- CONNEXION ---
+# --- INITIALISATION SÉCURISÉE ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -12,23 +12,29 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"Erreur : {e}")
+        st.error(f"❌ Erreur d'initialisation Firebase : {e}")
 
 db = firestore.client()
+# On pointe sur le document spécifique
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key="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")
 
-# --- SYSTÈME DE MÉMOIRE VIVE ---
-res = doc_ref.get()
-archives = res.to_dict() if res.exists else {}
+# --- CHARGEMENT ---
+try:
+    res = doc_ref.get()
+    archives = res.to_dict() if res.exists else {}
+except Exception as e:
+    st.error(f"❌ Impossible de lire Firebase : {e}")
+    archives = {}
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI", page_icon="🌐")
-st.title("🌐 DELTA : Intelligence Artificielle Générale")
+st.title("🌐 DELTA : Diagnostic AGI")
 
 with st.sidebar:
-    st.header("🧠 Cortex Lux")
-    st.json(archives) # Pour voir la création en direct
+    st.header("🧠 Archives Lux")
+    st.write("Statut : " + ("Connecté" if archives else "Vide/Déconnecté"))
+    st.json(archives)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -36,51 +42,40 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- MOTEUR D'APPRENTISSAGE ---
-if prompt := st.chat_input("Initialisation..."):
+# --- MOTEUR D'INJECTION ---
+if prompt := st.chat_input("Test d'écriture..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. ANALYSE COGNITIVE (IA FORTE)
-    cognition_prompt = (
-        f"MÉMOIRE ACTUELLE : {json.dumps(archives)}\n"
-        f"MESSAGE : '{prompt}'\n\n"
-        "Tu es une IA forte. Décide de ce qui doit être appris.\n"
-        "FORMAT JSON STRICT : {'update': {'categorie': {'clé': 'valeur'}}, 'style': 'ton'}"
-    )
-    
+    # 1. ANALYSE COGNITIVE
     try:
-        # On force la réponse JSON pour éviter les erreurs de syntaxe
-        response = client.chat.completions.create(
+        extraction = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Processeur AGI. Extrais l'implicite."}],
+            messages=[{"role": "system", "content": "Tu es une IA forte. Extrais les données en JSON pur."}],
             response_format={"type": "json_object"},
-            content=cognition_prompt
+            content=f"Archive ceci : {prompt}. Format: {{'update': {{'categorie': {{'clé': 'valeur'}}}}}}"
         ).choices[0].message.content
         
-        brain = json.loads(response)
+        brain = json.loads(extraction)
         
-        # 2. INJECTION FORCÉE (Le correctif pour votre image)
-        if "update" in brain and brain["update"]:
-            # On utilise set() avec merge=True pour forcer la création du document
-            doc_ref.set(brain["update"], merge=True)
-            st.toast("🧬 Évolution enregistrée dans Firebase.")
-            st.rerun() # On relance pour rafraîchir la sidebar
-            
-    except Exception as e:
-        st.error(f"Échec de l'apprentissage : {e}")
+        # 2. INJECTION ET CAPTURE D'ERREUR
+        if "update" in brain:
+            # TENTATIVE D'ÉCRITURE DIRECTE
+            try:
+                doc_ref.set(brain["update"], merge=True)
+                st.success("✅ Données envoyées à Firebase !")
+                st.rerun()
+            except Exception as fire_err:
+                st.error(f"🔥 Erreur Firebase Directe : {fire_err}")
+                
+    except Exception as ai_err:
+        st.error(f"🤖 Erreur IA : {ai_err}")
 
-    # 3. RÉPONSE ADAPTATIVE
+    # 3. RÉPONSE
     with st.chat_message("assistant"):
-        nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
-        style = brain.get("style", "Jarvis") if 'brain' in locals() else "Jarvis"
-        
-        sys_instr = f"Tu es DELTA. Identité : {nom}. Mémoire : {json.dumps(archives)}. Style : {style}."
-        
-        res_ai = client.chat.completions.create(
+        sys_instr = f"Tu es DELTA. Mémoire : {json.dumps(archives)}. Style : Jarvis."
+        response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:],
         ).choices[0].message.content
-        
-        st.markdown(res_ai)
-        st.session_state.messages.append({"role": "assistant", "content": res_ai})
+        st.markdown(response)
