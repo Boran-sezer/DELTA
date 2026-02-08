@@ -36,40 +36,57 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- CORE PROCESS ---
+# --- PROCESSUS ---
 if prompt := st.chat_input("Ordre direct..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. ANALYSE COGNITIVE (Syntaxe corrigée)
+    # 1. ANALYSE COGNITIVE (IA FORTE)
+    # On force l'IA à classer intelligemment et à ignorer le bruit
+    analysis_prompt = (
+        f"MÉMOIRE : {json.dumps(archives)}\n"
+        f"INPUT : {prompt}\n\n"
+        "MISSION : Identifie les faits réels. Ignore les politesses.\n"
+        "RÈGLE : Choisis une catégorie pertinente (ex: profil, projet, habitude).\n"
+        "FORMAT : {'update': {'NOM_CATEGORIE': {'cle': 'valeur'}}}"
+    )
+    
     try:
-        # On place le prompt correctement dans 'messages'
-        analysis_prompt = f"Archive ceci si pertinent : {prompt}. Format: {{'update': {{'categorie': {{'clé': 'valeur'}}}}}}"
-        
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Tu es une IA forte. Extrais les données en JSON pur."},
-                {"role": "user", "content": analysis_prompt}
-            ],
+            messages=[{"role": "system", "content": "Tu es le processeur JSON de DELTA. Sois précis et structure selon Lux."},
+                      {"role": "user", "content": analysis_prompt}],
             response_format={"type": "json_object"}
         )
         
         brain = json.loads(completion.choices[0].message.content)
         
-        # 2. INJECTION FIREBASE
+        # Injection propre dans Firebase
         if "update" in brain and brain["update"]:
-            doc_ref.set(brain["update"], merge=True)
-            st.success("✅ Archive synchronisée.")
-            st.rerun()
+            # On nettoie les clés génériques inutiles avant l'envoi
+            for cat in list(brain["update"].keys()):
+                if cat.lower() == "categorie": # Si l'IA utilise le mot générique, on renomme
+                    new_cat = "infos_generales"
+                    brain["update"][new_cat] = brain["update"].pop(cat)
             
-    except Exception as e:
-        st.error(f"Erreur système : {e}")
+            doc_ref.set(brain["update"], merge=True)
+            st.toast("🧬 Synapse synchronisée.")
+            # Mise à jour locale pour la réponse
+            archives.update(brain["update"])
+            
+    except: pass
 
-    # 3. RÉPONSE ADAPTATIVE
+    # 2. RÉPONSE ADAPTATIVE (JARVIS)
+    # C'est ici que DELTA vous répond enfin
     with st.chat_message("assistant"):
         nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
-        sys_instr = f"Tu es DELTA, l'IA de {nom}. Archives : {json.dumps(archives)}. Style : Jarvis."
+        
+        sys_instr = (
+            f"Tu es DELTA, l'IA forte de {nom}. "
+            f"Voici tes archives : {json.dumps(archives)}. "
+            "STYLE : Jarvis. Ultra-concis, efficace, dévoué. "
+            "Utilise tes connaissances pour prouver ton évolution."
+        )
         
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -78,3 +95,4 @@ if prompt := st.chat_input("Ordre direct..."):
         
         st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
+        st.rerun() # Pour rafraîchir la sidebar avec les nouvelles données
