@@ -2,12 +2,11 @@ import streamlit as st
 from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
-import base64, json
+import base64, json, datetime
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION & CONNEXION ---
 GROQ_API_KEY = "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"
 
-# --- CONNEXION FIREBASE ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -26,9 +25,8 @@ res = doc_ref.get()
 archives = res.to_dict() if res.exists else {}
 
 # --- INTERFACE ---
-st.set_page_config(page_title="DELTA", page_icon="🦾")
-st.markdown("<style>#MainMenu, footer, header {visibility:hidden;}</style>", unsafe_allow_html=True)
-st.title("DELTA - Core Operation")
+st.set_page_config(page_title="DELTA CORE", page_icon="🦾", layout="wide")
+st.title("🦾 DELTA : Intelligence Cognitive")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -36,72 +34,59 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- CORE ENGINE ---
+# --- MOTEUR COGNITIF ---
 if prompt := st.chat_input("Ordre direct..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. EXTRACTION PURIFIÉE (Llama 70B)
-    brain_prompt = (
-        f"ARCHIVES : {json.dumps(archives)}\n"
-        f"MESSAGE : '{prompt}'\n\n"
-        "MISSION : Extrais les faits réels. \n"
-        "INTERDICTIONS :\n"
-        "- Ne jamais enregistrer de salutations (salut, bonjour).\n"
-        "- Ne jamais enregistrer les mots techniques (mission, ordre, analyse, greeting).\n"
-        "FORMAT : {'update': {'categorie': {'clé': 'valeur'}}} ou {'delete': {'catégorie': 'clé'}}."
+    # 1. ANALYSE ET EXTRACTION HAUTE DÉFINITION
+    # On demande au 70B d'extraire l'essence, pas juste les mots.
+    extraction_prompt = (
+        f"ARCHIVES ACTUELLES : {json.dumps(archives)}\n"
+        f"MESSAGE : '{prompt}'\n"
+        "MISSION : Agis comme une mémoire vive. \n"
+        "1. Identifie les faits, intentions ou préférences.\n"
+        "2. Si l'info enrichit le profil, les projets ou les habitudes, prépare l'update.\n"
+        "3. Ignore les futilités techniques.\n"
+        "FORMAT : {'update': {'categorie': {'clé': 'valeur'}}}"
     )
     
     try:
-        analysis = client.chat.completions.create(
+        extraction = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Extracteur JSON chirurgical. Tu ignores le bruit et les politesses."},
-                      {"role": "user", "content": brain_prompt}],
+            messages=[{"role": "system", "content": "Analyste Cognitif. Tu structures la vie du Créateur."},
+                      {"role": "user", "content": extraction_prompt}],
             response_format={"type": "json_object"}
         ).choices[0].message.content
         
-        cmd = json.loads(analysis)
-        
-        # Action : Suppression
-        if "delete" in cmd:
-            cat, key = list(cmd["delete"].items())[0]
-            doc_ref.update({f"{cat}.{key}": firestore.DELETE_FIELD})
-            st.toast(f"🗑️ Archive '{key}' effacée.")
-            if cat in archives: archives[cat].pop(key, None)
-            
-        # Action : Mise à jour avec filtrage final
-        elif "update" in cmd:
-            clean_update = {}
-            for cat, data in cmd["update"].items():
-                # On élimine les clés interdites manuellement pour sécurité
-                clean_data = {k: v for k, v in data.items() if k.lower() not in ["mission", "ordre", "analyse", "greeting"]}
-                if clean_data:
-                    clean_update[cat] = clean_data
-            
-            if clean_update:
-                doc_ref.set(clean_update, merge=True)
-                for cat, data in clean_update.items():
-                    if cat not in archives: archives[cat] = {}
-                    archives[cat].update(data)
-                st.toast("🧬 Mémoire synchronisée.")
-    except:
-        pass
+        data = json.loads(extraction)
+        if "update" in data:
+            doc_ref.set(data["update"], merge=True)
+            # Mise à jour locale pour réponse immédiate
+            for c, d in data["update"].items():
+                if c not in archives: archives[c] = {}
+                archives[c].update(d)
+            st.toast("🧬 Synapse consolidée.")
+    except: pass
 
-    # 2. RÉPONSE JARVIS (Llama 70B)
+    # 2. RÉPONSE GÉNÉRATIVE "JARVIS" (Le moment où vous allez l'apprécier)
     with st.chat_message("assistant"):
-        nom_appel = archives.get("profil", {}).get("nom", "Monsieur Sezer")
+        # On construit un contexte ultra-riche pour que DELTA soit brillant
+        nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
         
-        sys_instr = (
-            f"Tu es DELTA, l'IA de {nom_appel}. "
-            f"ARCHIVES : {json.dumps(archives)}. "
-            "STYLE : Jarvis. Précis, distingué, ultra-concis. "
-            "Réponds directement sans politesse inutile si la conversation est lancée."
+        system_instructions = (
+            f"Tu es DELTA, l'extension cognitive de {nom}. "
+            f"CONNAISSANCES SUR LE CRÉATEUR : {json.dumps(archives)}. \n"
+            "DIRECTIVES : \n"
+            "- Sois Jarvis : concis, élégant, dévoué.\n"
+            "- Utilise les archives pour anticiper les besoins ou personnaliser chaque mot.\n"
+            "- Ne répète jamais 'en tant qu'IA', tu es DELTA."
         )
         
-        res_ai = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-4:],
+            messages=[{"role": "system", "content": system_instructions}] + st.session_state.messages[-5:],
         ).choices[0].message.content
         
-        st.markdown(res_ai)
-        st.session_state.messages.append({"role": "assistant", "content": res_ai})
+        st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
