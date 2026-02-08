@@ -80,32 +80,36 @@ if prompt := st.chat_input("À votre service..."):
 
     sys_info = get_precise_context()
     
-    # 1. ARCHIVAGE INTELLIGENT (FILTRE LUX CORRECTIF)
+   # 1. ARCHIVAGE AVEC TRI STRUCTURÉ (FILTRE LUX ÉVOLUÉ)
     try:
         extraction_prompt = (
-            f"Analyse ce message de mon créateur ({user_identity}) : '{prompt}'. "
-            "Si tu y trouves une info factuelle (âge, nom, passion, projet), "
-            "ajoute-la ou mets-la à jour dans ce JSON et renvoie UNIQUEMENT le JSON : "
-            f"{json.dumps(memoire)}. "
-            "Si aucune info importante, réponds : AUCUN_CHANGEMENT"
+            f"Analyse ce message : '{prompt}'. "
+            "Tu dois classer les nouvelles informations dans ce JSON structuré : "
+            "{'profil': {'nom': '', 'age': '', 'preferences': []}, 'projets': {}, 'divers': {}}. "
+            f"Voici la mémoire actuelle : {json.dumps(memoire)}. "
+            "RÈGLES : "
+            "1. Si l'info concerne l'identité (âge, nom), mets-la dans 'profil'. "
+            "2. Si c'est un travail ou une idée, mets-la dans 'projets'. "
+            "3. Si aucune info durable n'est présente, réponds STRICTEMENT : AUCUN_CHANGEMENT. "
+            "4. Renvoie le JSON COMPLET mis à jour."
         )
         
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
-            messages=[{"role": "user", "content": extraction_prompt}]
+            messages=[{"role": "system", "content": "Tu es un expert en structuration de données JSON."},
+                      {"role": "user", "content": extraction_prompt}]
         ).choices[0].message.content
 
         if "AUCUN_CHANGEMENT" not in check:
-            # Extraction robuste par Regex du bloc JSON
             match = re.search(r'\{.*\}', check, re.DOTALL)
             if match:
                 new_data = json.loads(match.group())
-                if new_data != memoire:
+                # On s'assure que la structure est respectée avant de sauvegarder
+                if any(key in new_data for key in ['profil', 'projets', 'divers']):
                     memoire = new_data
                     doc_ref.set(memoire, merge=True)
     except:
         pass
-
     # 2. RECHERCHE WEB
     decision_prompt = f"Besoin du web pour : '{prompt}' ? OUI/NON."
     try:
