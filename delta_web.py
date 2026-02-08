@@ -11,7 +11,6 @@ if not firebase_admin._apps:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred_dict = json.loads(decoded_json)
-        # Vérification rapide
         required_keys = ["type","project_id","private_key","client_email"]
         for k in required_keys:
             if k not in cred_dict:
@@ -53,7 +52,7 @@ st.title("🌐 DELTA : Système AGI")
 
 mem_ref = db.collection("users").document(USER_ID).collection("memory")
 
-# Sidebar avec mémoire
+# --- SIDEBAR MÉMOIRE ---
 context_list = get_recent_memories()
 with st.sidebar:
     st.header("🧠 Mémoire Vive")
@@ -63,9 +62,9 @@ with st.sidebar:
     else:
         st.info("Aucun souvenir pour le moment")
     if st.button("🔄 Actualiser"):
-        st.experimental_rerun()
+        context_list = get_recent_memories()  # rafraîchit seulement le contexte
 
-# Chat session state
+# --- SESSION STATE CHAT ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -75,11 +74,11 @@ for m in st.session_state.messages:
 
 # --- PROCESSUS PRINCIPAL ---
 if prompt := st.chat_input("En attente de vos ordres, Monsieur Sezer..."):
-    # 1. Ajout du message utilisateur
+    # 1. Ajouter le message utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 2. Analyse et stockage si mémoire pertinente
+    # 2. Analyse et stockage mémoire
     if is_memory_worthy(prompt):
         try:
             # Catégorisation via Groq
@@ -95,7 +94,7 @@ if prompt := st.chat_input("En attente de vos ordres, Monsieur Sezer..."):
 
             # Stockage dans Firebase
             m_hash = hash_text(prompt)
-            ref = mem_ref.document(m_hash)  # Utilise hash comme ID
+            ref = mem_ref.document(m_hash)
             if not ref.get().exists:
                 ref.set({
                     "category": cat,
@@ -108,7 +107,7 @@ if prompt := st.chat_input("En attente de vos ordres, Monsieur Sezer..."):
         except Exception as e:
             st.error(f"Erreur analyse ou stockage mémoire : {e}")
 
-    # 3. Récupération mémoire à jour
+    # 3. Récupérer mémoire à jour pour le contexte
     context_list = get_recent_memories()
 
     # 4. Réponse Jarvis
