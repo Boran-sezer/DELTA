@@ -33,9 +33,10 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 def is_memory_worthy(text: str) -> dict:
+    """Détermine si l'info mérite d'être mémorisée"""
     blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
     if len(text.strip()) < 15 or any(word in text.lower() for word in blacklist):
-        return {"is_worthy": False, "priority": "low", "branch": "Général"}
+        return {"is_worthy": False, "priority": "low", "branch": "Memory"}
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -45,9 +46,13 @@ def is_memory_worthy(text: str) -> dict:
             ],
             response_format={"type": "json_object"}
         )
-        return json.loads(analysis.choices[0].message.content)
+        res = json.loads(analysis.choices[0].message.content)
+        # Si LLM propose une branche trop vague ou inutile, mettre "Memory"
+        if not res.get("branch") or res.get("branch").lower() in ["général", "default"]:
+            res["branch"] = "Memory"
+        return res
     except:
-        return {"is_worthy": False, "priority": "low", "branch": "Général"}
+        return {"is_worthy": False, "priority": "low", "branch": "Memory"}
 
 def merge_similar_memories(memories):
     merged = []
@@ -110,13 +115,13 @@ if prompt := st.chat_input("Commandez Jarvis..."):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Déterminer la branche : personne ou thème
+    # Analyse mémoire
     mem_analysis = is_memory_worthy(prompt)
-    branch_name = mem_analysis.get("branch", "Général")  # ex: "monsieur_sezer", "jules", "projets", etc.
+    branch_name = mem_analysis.get("branch", "Memory")  # Branche par défaut = Memory
     doc_hash = hash_text(prompt)
 
-    # Écriture silencieuse
-    if db:
+    # Écriture silencieuse uniquement si info utile
+    if db and mem_analysis.get("is_worthy"):
         try:
             db.collection("memory").document(branch_name).collection("souvenirs").document(doc_hash).set({
                 "content": prompt,
@@ -130,10 +135,10 @@ if prompt := st.chat_input("Commandez Jarvis..."):
 
     cleanup_old_memories()  # Nettoyage automatique
 
-    # Réponse Jarvis avec contexte de la branche
+    # Réponse Jarvis
     with st.chat_message("assistant"):
         ctx = summarize_context(branch_name)
-        sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Sois concis, intelligent et pertinent."
+        sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Sois concis, intelligent et bluffant."
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
