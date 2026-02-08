@@ -43,9 +43,12 @@ def get_precise_context():
         "adresse": "58 Av. Beauregard, 74960 Annecy, France"
     }
 
-# --- CHARGEMENT DE LA MÉMOIRE ---
+# --- CHARGEMENT DE LA MÉMOIRE & IDENTIFICATION ---
 res = doc_ref.get()
 memoire = res.to_dict() if res.exists else {"profil": {}, "projets": {}, "divers": {}}
+
+# Identification immédiate de l'utilisateur dès l'ouverture
+user_identity = memoire.get("profil", {}).get("nom", "Monsieur Sezer")
 
 # --- INTERFACE ÉPURÉE ---
 st.set_page_config(page_title="DELTA", layout="wide")
@@ -82,9 +85,9 @@ if prompt := st.chat_input("À votre service..."):
     # 1. TRI INTELLIGENT DE MÉMOIRE (FILTRE LUX)
     try:
         extraction_prompt = (
-            f"Agis comme l'archiviste de Monsieur Sezer. Analyse : '{prompt}'. "
+            f"Agis comme l'archiviste de {user_identity}. Analyse : '{prompt}'. "
             "Extrais uniquement les faits durables (identité, préférences, projets). "
-            "Ignore le reste. Réponds par le JSON fusionné ou 'NON_ESSENTIEL'."
+            "Réponds par le JSON complet et fusionné ou 'NON_ESSENTIEL'."
         )
         check = client.chat.completions.create(
             model="llama-3.1-8b-instant", 
@@ -118,14 +121,14 @@ if prompt := st.chat_input("À votre service..."):
         full_res = ""
         
         sys_instr = (
-            f"Tu es DELTA. Ton créateur est Monsieur Sezer. "
+            f"Tu es DELTA. Ton créateur et seul interlocuteur est {user_identity}. "
             f"SITUATION : {sys_info['date']}, {sys_info['heure']} au {sys_info['adresse']}. "
             f"ARCHIVES : {json.dumps(memoire)}. WEB : {web_data}. "
             "DIRECTIVES : "
             "1. Ton de Jarvis : Distingué, dévoué, EXTRÊMEMENT CONCIS. "
-            "2. Utilise les ARCHIVES pour personnaliser ta réponse. "
+            "2. Tu sais parfaitement qui est ton créateur grâce aux ARCHIVES. "
             "3. Ne mentionne ta position ou l'heure que si demandé. "
-            "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
+            "4. Ne termine par le nom de l'utilisateur que si tu ne l'as pas cité avant."
         )
 
         stream = client.chat.completions.create(
@@ -138,4 +141,3 @@ if prompt := st.chat_input("À votre service..."):
                 full_res += chunk.choices[0].delta.content
                 placeholder.markdown(full_res + "▌")
         placeholder.markdown(full_res)
-        st.session_state.messages.append({"role": "assistant", "content": full_res})
