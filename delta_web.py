@@ -20,82 +20,93 @@ if not firebase_admin._apps:
 db = firestore.client()
 USER_ID = "monsieur_sezer"
 
-# --- FONCTION DE DÉPLOIEMENT DE STRUCTURE ---
-def deploy_structure(category, content, topic):
-    try:
-        # 1. Force la création du document parent (indispensable pour voir la structure)
-        parent_ref = db.collection("archives").document(USER_ID)
-        parent_ref.set({"status": "active", "last_update": datetime.utcnow()}, merge=True)
-        
-        # 2. Crée la branche dans la sous-collection
-        m_hash = hashlib.sha256(content.encode()).hexdigest()
-        branch_ref = parent_ref.collection("branches").document(m_hash)
-        
-        branch_ref.set({
-            "category": category,
-            "content": content,
-            "topic": topic,
-            "created_at": datetime.utcnow()
-        })
-        return True
-    except Exception as e:
-        st.error(f"Erreur d'écriture : {e}")
-        return False
-
 # --- INITIALISATION GROQ ---
 client = Groq(api_key="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")
 
+# --- FONCTION DE RÉCUPÉRATION MULTI-BRANCHES ---
+def get_all_archives():
+    archives = {}
+    try:
+        # On liste les sous-collections du document utilisateur
+        collections = db.collection("archives").document(USER_ID).collections()
+        for col in collections:
+            docs = col.order_by("created_at", direction=firestore.Query.DESCENDING).limit(3).stream()
+            archives[col.id] = [d.to_dict() for d in docs]
+        return archives
+    except:
+        return {}
+
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI", page_icon="🌐", layout="wide")
-st.title("🌐 DELTA : Déploiement Forcé")
+st.title("🌐 DELTA : Système Jarvis Opérationnel")
 
-# Chargement des données pour la sidebar
-memories = db.collection("archives").document(USER_ID).collection("branches").stream()
-context_list = [m.to_dict() for m in memories]
+# Chargement du contexte global
+all_memories = get_all_archives()
 
 with st.sidebar:
-    st.header("🧠 Branches Lux")
-    for m in context_list:
-        st.write(f"📁 **{m.get('category')}** : {m.get('content')}")
-    if st.button("🔄 Hard Refresh"):
-        st.rerun()
+    st.header("🗂️ Branches Archives")
+    if not all_memories:
+        st.info("Initialisation requise...")
+    for branch, items in all_memories.items():
+        with st.expander(f"📁 {branch}"):
+            for item in items:
+                st.caption(f"• {item.get('content')[:50]}...")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    # PAR DÉFAUT : Delta engage la conversation
+    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres, Monsieur Sezer. Le système est en ligne. Que souhaitez-vous structurer aujourd'hui ?"}]
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- LOGIQUE PRINCIPALE ---
-if prompt := st.chat_input("Initialisation de branche..."):
+# --- PROCESSUS COGNITIF ---
+if prompt := st.chat_input("Répondez à Jarvis..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Analyse IA
-    analysis = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": "Tu es une IA forte. Réponds en JSON: {'branch': 'nom', 'topic': 'sujet'}"},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"}
-    )
-    
-    res = json.loads(analysis.choices[0].message.content)
-    
-    # Exécution du déploiement
-    success = deploy_structure(res.get('branch'), prompt, res.get('topic'))
-    
-    if success:
-        st.toast("✅ Structure déployée dans Firebase.")
-        
-    # Réponse Jarvis
-    with st.chat_message("assistant"):
-        response = client.chat.completions.create(
+    # 1. ANALYSE ET RÉPARTITION DANS LES BRANCHES
+    try:
+        analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Tu es Jarvis. Confirme la création de la branche."}] + st.session_state.messages[-3:]
-        ).choices[0].message.content
-        st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
-    
+            messages=[
+                {"role": "system", "content": "Tu es l'architecte de données de Monsieur Sezer. Catégorise l'info. Réponds en JSON: {'branch': 'NOM_BRANCHE', 'is_worthy': bool}"},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        res = json.loads(analysis.choices[0].message.content)
+
+        if res.get("is_worthy"):
+            branch_name = res.get("branch", "Général")
+            m_hash = hashlib.sha256(prompt.encode()).hexdigest()
+            
+            # Écriture dans la branche spécifique
+            db.collection("archives").document(USER_ID).collection(branch_name).document(m_hash).set({
+                "content": prompt,
+                "created_at": datetime.utcnow()
+            }, merge=True)
+            st.toast(f"🧬 Donnée injectée dans la branche {branch_name}")
+    except Exception as e:
+        st.warning(f"Note: Analyse de branche ignorée ({e})")
+
+    # 2. RÉPONSE JARVIS (CONCISE & DIRECTE)
+    with st.chat_message("assistant"):
+        context_summary = str(all_memories)[:500] # On injecte un condensé des archives
+        sys_instr = (
+            f"Tu es Jarvis. Ton créateur est Monsieur Sezer. "
+            f"Contexte des branches : {context_summary}. "
+            "Parle-lui directement. Sois concis, intelligent, et toujours prêt à servir."
+        )
+        
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:]
+            ).choices[0].message.content
+            
+            st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        except Exception as e:
+            st.error(f"Erreur Groq : {e}")
+
     st.rerun()
