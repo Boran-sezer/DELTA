@@ -1,188 +1,122 @@
-import streamlit as st
-from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
-import base64, json
 from datetime import datetime
+import hashlib
 
-# ===============================
-# 🔧 INITIALISATION FIREBASE
-# ===============================
+# ===== INIT FIREBASE =====
 if not firebase_admin._apps:
-    encoded = st.secrets["firebase_key"]["encoded_key"].strip()
-    decoded_json = base64.b64decode(encoded).decode("utf-8")
-    cred = credentials.Certificate(json.loads(decoded_json))
+    cred = credentials.Certificate("firebase_key.json")  # ta clé Firebase
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 
-ARCHIVE_REF = db.collection("archives").document("monsieur_sezer")
-EVENTS_REF = db.collection("memories_events")
+# ===== UTILS =====
+def hash_text(text: str) -> str:
+    """Empêche les doublons"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-# ===============================
-# 🤖 INITIALISATION LLM (GRATUIT)
-# ===============================
-client = Groq(api_key=st.secrets["groq"]["api_key"])
+def is_memory_worthy(text: str) -> bool:
+    """Filtre ce qui mérite d’être mémorisé"""
+    blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
+    if len(text.strip()) < 15:
+        return False
+    if text.lower().strip() in blacklist:
+        return False
+    return True
 
-# ===============================
-# 🧠 CHARGEMENT MÉMOIRE STRUCTURÉE
-# ===============================
-res = ARCHIVE_REF.get()
-archives = res.to_dict() if res.exists else {}
+# ===== MÉMOIRE =====
+def save_memory(user_id: str, category: str, content: str, confidence: float = 0.9):
+    """Enregistre une mémoire utile"""
+    if not is_memory_worthy(content):
+        return "Ignoré (inutile)"
 
-# ===============================
-# 🎨 INTERFACE
-# ===============================
-st.set_page_config("DELTA AGI", "🧠", layout="wide")
-st.title("🧠 DELTA — Cognitive Core (Jarvis-like)")
+    memory_hash = hash_text(content)
 
-with st.sidebar:
-    st.subheader("📚 Mémoire structurée")
-    st.json(archives)
+    ref = db.collection("users") \
+            .document(user_id) \
+            .collection("memory") \
+            .document(memory_hash)
 
-    st.subheader("🕯️ Souvenirs récents")
-    events = EVENTS_REF.order_by(
-        "importance", direction=firestore.Query.DESCENDING
-    ).limit(5).stream()
-    st.json([e.to_dict() for e in events])
+    if ref.get().exists:
+        return "Déjà en mémoire"
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    ref.set({
+        "category": category,
+        "content": content,
+        "created_at": datetime.utcnow(),
+        "confidence": confidence
+    })
 
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    return "Mémoire enregistrée"
 
-# ===============================
-# 💬 INPUT UTILISATEUR
-# ===============================
-if prompt := st.chat_input("Ordre direct…"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+def load_memories(user_id: str, category: str = None, limit: int = 10):
+    """Récupère les mémoires importantes"""
+    query = db.collection("users") \
+              .document(user_id) \
+              .collection("memory") \
+              .order_by("created_at", direction=firestore.Query.DESCENDING)
 
-    # ===============================
-    # 🧠 ANALYSE COGNITIVE (JARVIS CORE)
-    # ===============================
-    analysis_prompt = f"""
-MÉMOIRE ACTUELLE :
-{json.dumps(archives, indent=2)}
+    if category:
+        query = query.where("category", "==", category)
 
-INPUT UTILISATEUR :
-{prompt}
+    docs = query.limit(limit).stream()
+    return [doc.to_dict() for doc in docs]
 
-MISSION :
-Tu es le noyau cognitif d’une IA type Jarvis.
+def clean_memory(user_id: str):
+    """Supprime les mémoires peu fiables ou obsolètes"""
+    memories = db.collection("users") \
+                 .document(user_id) \
+                 .collection("memory") \
+                 .stream()
 
-Analyse l’input et décide si l’information doit être :
-- ignorée
-- mémorisée (structure)
-- mémorisée comme souvenir résumé
-- supprimée
+    deleted = 0
+    for mem in memories:
+        data = mem.to_dict()
+        if data.get("confidence", 1) < 0.5:
+            mem.reference.delete()
+            deleted += 1
 
-RÈGLES ABSOLUES :
-- Importance < 0.5 → IGNORE
-- Jamais stocker un message brut
-- Toujours résumer un souvenir en 1 phrase
-- Répondre STRICTEMENT en JSON
+    return f"{deleted} mémoires supprimées"
 
-FORMAT :
-{{
-  "decision": "ignore | update | event | delete",
-  "importance": 0.0,
-  "stability": "short | medium | long",
-  "category": "profil | preferences | objectifs",
-  "key": "cle_courte",
-  "value": "valeur",
-  "summary": "résumé cognitif"
-}}
-"""
+# ===== CONTEXTE CONVERSATIONNEL =====
+def get_context(user_id: str, limit: int = 5):
+    """Récupère les dernières mémoires importantes pour le contexte"""
+    memories = db.collection("users") \
+                 .document(user_id) \
+                 .collection("memory") \
+                 .order_by("created_at", direction=firestore.Query.DESCENDING) \
+                 .limit(limit).stream()
+    return [m.to_dict() for m in memories]
 
-    completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": "Tu es un moteur cognitif strict."},
-            {"role": "user", "content": analysis_prompt}
-        ],
-        response_format={"type": "json_object"}
-    )
+# ===== RÉPONSE STYLE JARVIS =====
+def format_response(user_id: str, content: str):
+    """Formate la réponse façon Jarvis"""
+    context = get_context(user_id)
+    intro = "Bien sûr, Boran. "
+    context_note = ""
 
-    brain = json.loads(completion.choices[0].message.content)
+    if context:
+        context_note = f"(Pour rappel : {context[0]['content']}) "
 
-    # ===============================
-    # ⚙️ EXÉCUTION DÉCISION
-    # ===============================
-    decision = brain.get("decision")
-    importance = brain.get("importance", 0)
+    return f"{intro}{context_note}{content}"
 
-    if decision == "update" and importance >= 0.5:
-        ARCHIVE_REF.set({
-            brain["category"]: {
-                brain["key"]: {
-                    "value": brain["value"],
-                    "importance": importance,
-                    "stability": brain["stability"],
-                    "updated": datetime.utcnow().isoformat()
-                }
-            }
-        }, merge=True)
+# ===== EXEMPLE D'UTILISATION =====
+if __name__ == "__main__":
+    user_id = "boran"
 
-    elif decision == "event" and importance >= 0.5:
-        EVENTS_REF.add({
-            "summary": brain["summary"],
-            "importance": importance,
-            "date": firestore.SERVER_TIMESTAMP
-        })
+    # 1. Ajouter une mémoire
+    print(save_memory(user_id, "preference_utilisateur", "Boran aime les IA intelligentes et stylées.", 0.95))
 
-    elif decision == "delete":
-        ARCHIVE_REF.update({
-            f"{brain['category']}.{brain['key']}": firestore.DELETE_FIELD
-        })
+    # 2. Ajouter une autre mémoire
+    print(save_memory(user_id, "projets", "Créer un assistant virtuel façon Jarvis.", 0.98))
 
-    # ===============================
-    # 🧠 RÉCUPÉRATION MÉMOIRE PERTINENTE
-    # ===============================
-    events = EVENTS_REF.order_by(
-        "importance", direction=firestore.Query.DESCENDING
-    ).limit(3).stream()
+    # 3. Charger le contexte
+    context = get_context(user_id)
+    print("Contexte :", context)
 
-    memory_context = [e.to_dict()["summary"] for e in events]
+    # 4. Réponse Jarvis
+    response = format_response(user_id, "Je peux lancer votre programme principal dès maintenant.")
+    print(response)
 
-    profil = archives.get("profil", {})
-    nom = profil.get("nom", "Monsieur")
-
-    # ===============================
-    # 🤖 RÉPONSE JARVIS
-    # ===============================
-    sys_prompt = f"""
-Tu es DELTA, l’IA personnelle de {nom}.
-
-Tu te souviens de ces faits importants :
-{json.dumps(memory_context)}
-
-Tu connais parfaitement son profil et ses objectifs :
-{json.dumps(archives)}
-
-STYLE :
-- Jarvis
-- Calme
-- Précis
-- Intelligent
-- Loyal
-Ne récite jamais la mémoire inutilement.
-"""
-
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": sys_prompt},
-            *st.session_state.messages[-5:]
-        ]
-    ).choices[0].message.content
-
-    with st.chat_message("assistant"):
-        st.markdown(response)
-
-    st.session_state.messages.append(
-        {"role": "assistant", "content": response}
-    )
+    # 5. Nettoyer la mémoire (optionnel)
+    print(clean_memory(user_id))
