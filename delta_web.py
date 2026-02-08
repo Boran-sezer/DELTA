@@ -3,11 +3,12 @@ from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
 import base64, json, re
+from datetime import datetime
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (Clé de Monsieur Sezer) ---
 GROQ_API_KEY = "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"
 
-# --- CONNEXION ---
+# --- CONNEXION FIREBASE (ARCHITECTURE LUX) ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -15,53 +16,86 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"Erreur clé : {e}")
+        st.error(f"Erreur d'initialisation : {e}")
 
 db = firestore.client()
-# On utilise la collection 'archives' comme Lux
+# Lux utilise la collection 'archives' pour plus de clarté
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- VERIFICATION CONNEXION ---
-try:
-    doc_ref.set({"derniere_connexion": "online"}, merge=True)
-    st.sidebar.success("✅ Firebase Connecté")
-except:
-    st.sidebar.error("❌ Firebase Bloqué (Vérifiez les Règles)")
-
-# --- LOGIQUE DE MÉMOIRE ---
+# --- CHARGEMENT DU SYSTÈME ---
 res = doc_ref.get()
-cerveau = res.to_dict() if res.exists else {"identite": {}, "projets": {}, "preferences": {}}
+# Structure de données aspirée de Lux
+archives = res.to_dict() if res.exists else {
+    "identite": {"nom": "Monsieur Sezer"},
+    "projets": {},
+    "preferences": {},
+    "logs": []
+}
 
-st.title("DELTA")
+# --- INTERFACE LUX-STYLE ---
+st.set_page_config(page_title="DELTA", layout="wide")
+st.markdown("<style>button {display:none;} #MainMenu, footer, header {visibility:hidden;}</style>", unsafe_allow_html=True)
 
-if prompt := st.chat_input("Dites : 'J'ai 18 ans'"):
-    # 1. LE TRIEUR (Filtre Lux)
-    extraction_prompt = (
-        f"Analyse : '{prompt}'. Si info cruciale, réponds UNIQUEMENT en JSON : "
-        "{'identite': {'age': 18}}. Sinon réponds 'RIEN'."
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]): st.markdown(m["content"])
+
+# --- CORE ENGINE ---
+if prompt := st.chat_input("Ordre..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.markdown(prompt)
+
+    # 1. LE FILTRE SYNAPTIQUE (Extraction & Classement)
+    # On force le modèle 8B à se comporter comme un processeur de données
+    filtre_prompt = (
+        f"CONTEXTE ACTUEL : {json.dumps(archives)}. "
+        f"MESSAGE : '{prompt}'. "
+        "MISSION : Si le message contient une info capitale (âge, nouveau projet, goût), "
+        "mets à jour le JSON ci-dessus. Réponds UNIQUEMENT avec le JSON complet. "
+        "Si rien n'est utile, réponds : 'STABLE'."
     )
     
-    trieur_res = client.chat.completions.create(
+    analysis = client.chat.completions.create(
         model="llama-3.1-8b-instant", 
-        messages=[{"role": "user", "content": extraction_prompt}]
+        messages=[{"role": "system", "content": "Tu es le processeur de données de DELTA. Pas de texte, juste du JSON."},
+                  {"role": "user", "content": filtre_prompt}]
     ).choices[0].message.content
 
-    if "RIEN" not in trieur_res:
-        match = re.search(r'\{.*\}', trieur_res, re.DOTALL)
+    if "STABLE" not in analysis:
+        match = re.search(r'\{.*\}', analysis, re.DOTALL)
         if match:
             try:
-                infos = json.loads(match.group().replace("'", '"'))
-                doc_ref.set(infos, merge=True)
-                st.toast("Mémoire mise à jour !")
+                # On aspire la nouvelle structure
+                archives = json.loads(match.group().replace("'", '"'))
+                # On ajoute un log de modification
+                archives["logs"].append(f"MàJ: {datetime.now().strftime('%H:%M')}")
+                # Sauvegarde forcée
+                doc_ref.set(archives, merge=True)
+                st.toast("🧬 Synapse mise à jour")
             except: pass
 
-    # 2. RÉPONSE
-    sys_instr = f"Tu es DELTA. Tu sais ça de Monsieur Sezer : {cerveau}. Sois très bref."
-    res_ai = client.chat.completions.create(
-        messages=[{"role": "system", "content": sys_instr}, {"role": "user", "content": prompt}],
-        model="llama-3.3-70b-versatile",
-    ).choices[0].message.content
-    
+    # 2. GÉNÉRATION DE RÉPONSE (Le Majordome)
     with st.chat_message("assistant"):
-        st.write(res_ai)
+        # On injecte toute l'archive aspirée dans le contexte du 70B
+        sys_instr = (
+            f"Tu es DELTA. Créateur : {archives['identite'].get('nom', 'Monsieur Sezer')}. "
+            f"MÉMOIRE : {json.dumps(archives)}. "
+            "TON : Jarvis. Précis, dévoué, sans fioritures. Utilise ta mémoire pour anticiper ses besoins."
+        )
+        
+        full_res = ""
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-6:],
+            stream=True
+        )
+        placeholder = st.empty()
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                full_res += chunk.choices[0].delta.content
+                placeholder.markdown(full_res + "▌")
+        placeholder.markdown(full_res)
+        st.session_state.messages.append({"role": "assistant", "content": full_res})
