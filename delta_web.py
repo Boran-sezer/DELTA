@@ -3,7 +3,7 @@ from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
 import base64, json, hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # --- INITIALISATION FIREBASE ---
 @st.cache_resource
@@ -24,7 +24,7 @@ def init_delta_brain():
 
 app = init_delta_brain()
 db = firestore.client() if app else None
-USER_ID = "monsieur_sezer" # Identifiant unique pour vos données
+USER_ID = "monsieur_sezer"  # Identifiant unique pour tes données
 
 # --- INITIALISATION GROQ ---
 client = Groq(api_key="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")
@@ -33,16 +33,25 @@ client = Groq(api_key="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"
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+def is_memory_worthy(text: str) -> bool:
+    """Retourne True si le texte mérite d'être mémorisé"""
+    blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
+    if len(text.strip()) < 10:
+        return False
+    for word in blacklist:
+        if word in text.lower():
+            return False
+    return True
+
 def get_memories(limit=30):
     """Récupère les souvenirs directement dans la collection de l'utilisateur"""
     if not db: return []
     try:
-        # Chemin direct et simplifié pour éviter les erreurs de lecture
         docs = db.collection("users").document(USER_ID).collection("memory") \
                  .order_by("created_at", direction=firestore.Query.DESCENDING) \
                  .limit(limit).stream()
         return [d.to_dict() for d in docs]
-    except Exception as e:
+    except:
         return []
 
 def summarize_context(memories, max_chars=600):
@@ -52,43 +61,46 @@ def summarize_context(memories, max_chars=600):
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI", layout="wide", initial_sidebar_state="collapsed")
+# On masque la sidebar
 st.markdown("<style>[data-testid='stSidebar'], header {display: none !important;}</style>", unsafe_allow_html=True)
 
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "À vos ordres, Monsieur Sezer. Système de mémoire actif."}]
 
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# --- PROCESSUS ---
+# --- PROCESSUS PRINCIPAL ---
 if prompt := st.chat_input("Commandez Jarvis..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    # 1. ÉCRITURE DANS FIREBASE (Correction du chemin)
-    if db and len(prompt) > 5:
+    # --- ÉCRITURE DANS FIREBASE SI PERTINENT ---
+    if db and is_memory_worthy(prompt):
         doc_hash = hash_text(prompt)
         try:
-            # On écrit dans : users / monsieur_sezer / memory / [HASH]
             db.collection("users").document(USER_ID).collection("memory").document(doc_hash).set({
                 "content": prompt,
                 "created_at": datetime.utcnow(),
                 "priority": "medium"
             }, merge=True)
+            st.toast("🧠 Info mémorisée !")
         except Exception as e:
             st.error(f"Erreur d'écriture : {e}")
 
-    # 2. RÉPONSE AVEC CONTEXTE
+    # --- RÉPONSE AVEC CONTEXTE ---
     with st.chat_message("assistant"):
         memories = get_memories()
         ctx = summarize_context(memories)
-        
+
         sys_instr = (
             f"Tu es Jarvis. Ton créateur est Monsieur Sezer. "
             f"Contexte de tes archives : {ctx}. "
-            "Réponds de façon concise et intelligente."
+            "Réponds de façon concise, intelligente et pertinente."
         )
-        
+
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
