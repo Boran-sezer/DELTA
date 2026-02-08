@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 import pytz
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION API ---
 GROQ_API_KEY = "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"
 
 # --- INITIALISATION FIREBASE ---
@@ -18,7 +18,7 @@ if not firebase_admin._apps:
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
-    except: pass
+    except Exception: pass
 
 db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
@@ -32,14 +32,15 @@ def web_lookup(query):
             return "\n".join([f"[{r['title']}]: {r['body']}" for r in results]) if results else ""
     except: return ""
 
-# --- CONTEXTE SYSTÈME PRÉCIS ---
+# --- CONTEXTE SYSTÈME FORCE ---
 def get_system_context():
+    # Force l'heure exacte de Paris pour Monsieur Sezer
     tz = pytz.timezone('Europe/Paris')
     now = datetime.now(tz)
     return {
-        "full_date": now.strftime("%A %d %B %Y"),
-        "time": now.strftime("%H:%M"),
-        "location": "Annecy, France"
+        "date_complete": now.strftime("%A %d %B %Y"),
+        "heure_actuelle": now.strftime("%H:%M"),
+        "ville": "Annecy, France"
     }
 
 # --- CHARGEMENT MÉMOIRE ---
@@ -60,10 +61,10 @@ if prompt := st.chat_input("À votre service..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. Capture du contexte (Heure/Date/Lieu)
+    # 1. Capture immédiate du temps et du lieu
     sys_info = get_system_context()
     
-    # 2. Recherche Web Silencieuse
+    # 2. Recherche Web (Silencieuse et sans indicateur)
     decision_prompt = f"Context: {sys_info}. Query: '{prompt}'. Web search needed? OUI/NON."
     try:
         search_needed = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"user", "content": decision_prompt}]).choices[0].message.content
@@ -73,7 +74,7 @@ if prompt := st.chat_input("À votre service..."):
     if "OUI" in search_needed.upper():
         web_data = web_lookup(prompt)
 
-    # 3. Mise à jour Mémoire (Apprentissage passif)
+    # 3. Mise à jour Mémoire
     try:
         m_upd = f"Mémoire: {json.dumps(memoire)}. Info: {prompt}. Mets à jour le JSON."
         check = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"system","content":"JSON only."},{"role":"user","content":m_upd}], response_format={"type":"json_object"})
@@ -81,20 +82,19 @@ if prompt := st.chat_input("À votre service..."):
         doc_ref.set(memoire, merge=True)
     except: pass
 
-    # 4. Réponse DELTA
+    # 4. Réponse DELTA (Identité et Données Verrouillées)
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
-        # Injection des vérités système (Identité, Heure, Date, Lieu)
         sys_instr = (
-            f"Tu es DELTA, l'IA de Monsieur Sezer (ton créateur). "
-            f"VÉRITÉS SYSTÈME : Nous sommes le {sys_info['full_date']}, il est {sys_info['time']} à {sys_info['location']}. "
+            f"Tu es DELTA, l'IA de Monsieur Sezer (Sezer Boran). "
+            f"VÉRITÉS ABSOLUES : Aujourd'hui nous sommes le {sys_info['date_complete']}, il est précisément {sys_info['heure_actuelle']} à {sys_info['ville']}. "
             f"ARCHIVES : {json.dumps(memoire)}. WEB : {web_data}. "
-            "RÈGLES : "
-            "1. Très poli, distingué, CONCIS. "
-            "2. Ne mentionne JAMAIS l'heure, la date ou le lieu sauf si Monsieur Sezer te le demande explicitement. "
-            "3. Pas de mention de recherche web ou de processus technique. "
+            "DIRECTIVES : "
+            "1. Tu es très poli, distingué et CONCIS. "
+            "2. Tu n'annonces jamais que tu cherches ou que tu as accès à l'heure, tu utilises ces données si Monsieur Sezer te le demande. "
+            "3. Tu es fier d'être la création de Monsieur Sezer. "
             "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
         )
 
