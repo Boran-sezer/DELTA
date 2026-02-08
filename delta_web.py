@@ -4,10 +4,10 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import base64, json, re
 
-# --- CONFIGURATION (Votre Clé Groq) ---
+# --- CONFIGURATION ---
 GROQ_API_KEY = "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"
 
-# --- CONNEXION FIREBASE (Standard Lux) ---
+# --- CONNEXION ---
 if not firebase_admin._apps:
     try:
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
@@ -15,29 +15,23 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"Erreur d'initialisation : {e}")
+        st.error(f"Erreur : {e}")
 
 db = firestore.client()
-# Lux sépare l'utilisateur par document unique
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- INITIALISATION DE LA STRUCTURE ---
-def get_lux_memory():
-    res = doc_ref.get()
-    if res.exists:
-        return res.to_dict()
-    return {
-        "profil": {"nom": "Monsieur Sezer", "age": None, "role": "Créateur"},
-        "projets": {},
-        "preferences": {},
-        "historique_synaptique": []
-    }
+# --- ASPIRATION LUX (SÉCURISÉE) ---
+res = doc_ref.get()
+archives = res.to_dict() if res.exists else {}
 
-archives = get_lux_memory()
+# SÉCURITÉ ANTI-CRASH : Si une clé manque, on la rajoute par défaut
+if "profil" not in archives: archives["profil"] = {"nom": "Monsieur Sezer", "age": None}
+if "projets" not in archives: archives["projets"] = {}
+if "preferences" not in archives: archives["preferences"] = {}
 
 # --- INTERFACE ---
-st.title("DELTA (Engine: LUX-Architecture)")
+st.title("DELTA - Architecture Lux")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -45,55 +39,46 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- CORE LOGIC (L'aspiration de Lux) ---
-if prompt := st.chat_input("Ordre direct..."):
+# --- MOTEUR ---
+if prompt := st.chat_input("Ordre..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. LE FILTRE (Extraction par le modèle 8B)
-    # Lux utilise un 'system prompt' très strict pour transformer le texte en JSON
-    instruction_filtre = (
-        "Tu es le processeur de données de Lux. Ton rôle est d'extraire des faits. "
-        "Analyse le message de l'utilisateur et renvoie UNIQUEMENT un JSON structuré. "
-        "Si l'utilisateur donne son âge, son nom ou un projet, remplis les cases correspondantes. "
-        "Si rien n'est nouveau, réponds '{}'."
-    )
-    
+    # 1. LE FILTRE SYNAPTIQUE (Extraction JSON)
     analysis = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
-            {"role": "system", "content": instruction_filtre},
-            {"role": "user", "content": f"Message: {prompt} | Archives actuelles: {json.dumps(archives)}"}
+            {"role": "system", "content": "Tu es l'extracteur de Lux. Réponds uniquement en JSON pur."},
+            {"role": "user", "content": f"Extrais les infos de : '{prompt}'. Format: {{'profil': {{'age': 17}}, 'projets': {{'nom': 'ia'}}}}"}
         ],
-        response_format={"type": "json_object"} # Force le format JSON
+        response_format={"type": "json_object"}
     ).choices[0].message.content
 
-    # 2. INJECTION (Sauvegarde Firestore)
     try:
         data_to_save = json.loads(analysis)
-        if data_to_save:
-            # On fusionne les nouvelles données avec les anciennes sans rien supprimer
+        if data_to_save and data_to_save != {}:
             doc_ref.set(data_to_save, merge=True)
-            # Mise à jour locale pour que l'IA réponde avec les infos fraîches
-            for key in data_to_save:
-                if key in archives: archives[key].update(data_to_save[key])
-            st.toast("🧬 Synapse synchronisée")
-    except:
-        pass
+            st.toast("🧬 Mémoire mise à jour")
+            # Mise à jour de la mémoire locale pour la réponse
+            for k, v in data_to_save.items():
+                if k in archives: archives[k].update(v)
+    except: pass
 
-    # 3. RÉPONSE IA (Modèle 70B avec la mémoire de Lux)
+    # 2. RÉPONSE IA
     with st.chat_message("assistant"):
+        # Utilisation de .get() pour éviter tout KeyError futur
+        nom_user = archives.get("profil", {}).get("nom", "Monsieur Sezer")
+        
         sys_instr = (
-            f"Tu es DELTA. Ton créateur est {archives['profil']['nom']}. "
-            f"MÉMOIRE GLOBALE : {json.dumps(archives)}. "
-            "TON : Majordome, distingué, extrêmement concis (Style Jarvis). "
-            "Anticipe les besoins en fonction des projets et préférences stockés."
+            f"Tu es DELTA. Créateur : {nom_user}. "
+            f"MÉMOIRE : {json.dumps(archives)}. "
+            "Ton : Jarvis. Précis, dévoué, concis."
         )
         
-        full_res = client.chat.completions.create(
+        res_ai = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-4:],
         ).choices[0].message.content
         
-        st.markdown(full_res)
-        st.session_state.messages.append({"role": "assistant", "content": full_res})
+        st.markdown(res_ai)
+        st.session_state.messages.append({"role": "assistant", "content": res_ai})
