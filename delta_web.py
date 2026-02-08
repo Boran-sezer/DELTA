@@ -4,34 +4,36 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import base64, json
 
-# --- ARCHITECTURE CORE ---
+# --- CONFIGURATION ---
 GROQ_API_KEY = "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"
 
 if not firebase_admin._apps:
     try:
+        # Assurez-vous que cette clé dans st.secrets est bien la NOUVELLE
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"Erreur d'accès : {e}")
+        st.error(f"Erreur d'initialisation : {e}")
 
 db = firestore.client()
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- MÉMOIRE VIVE ---
+# --- CHARGEMENT ---
 res = doc_ref.get()
 archives = res.to_dict() if res.exists else {}
 
 # --- INTERFACE ---
-st.set_page_config(page_title="DELTA AGI", page_icon="🌐", layout="wide")
-st.title("🌐 DELTA : Intelligence Artificielle Générale")
+st.set_page_config(page_title="DELTA AGI", page_icon="🌐")
+st.title("🌐 DELTA : Système AGI + LUX")
 
-# Sidebar pour la visibilité des archives (Transparence du système)
+# Fenêtre de contrôle pour voir si Firebase réagit
 with st.sidebar:
-    st.header("🧠 État Synaptique")
-    st.json(archives)
+    st.subheader("🛠 Console de Débogage")
+    if st.button("Vider la console"): st.rerun()
+    st.write("Archives actuelles :", archives)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -39,62 +41,52 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- PROCESSUS COGNITIF AGI ---
-if prompt := st.chat_input("Interagir avec DELTA..."):
+# --- MOTEUR COGNITIF ---
+if prompt := st.chat_input("Ordre direct..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. CORTEX D'ANALYSE (AGI + LUX)
-    # On demande à l'IA de décider elle-même de la structure de stockage
-    cortex_prompt = (
-        f"ARCHIVES : {json.dumps(archives)}\n"
-        f"INPUT : '{prompt}'\n\n"
-        "MISSION IA FORTE :\n"
-        "1. ANALYSE : Comprends l'intention, l'implicite et les faits.\n"
-        "2. DÉCISION : Si l'info mérite d'être apprise, choisis ou crée une catégorie (Structure Lux).\n"
-        "3. ÉVOLUTION : Définis comment adapter ton comportement (Style).\n"
-        "RÉPONDS UNIQUEMENT EN JSON : {'update': {'categorie': {'clé': 'valeur'}}, 'style_evolution': 'description'}"
+    # 1. ANALYSE ET DÉCISION AUTONOME
+    cognition_prompt = (
+        f"MÉMOIRE : {json.dumps(archives)}\n"
+        f"MESSAGE : '{prompt}'\n"
+        "MISSION : Décide ce qui doit être appris selon le protocole LUX.\n"
+        "FORMAT : {'update': {'categorie': {'clé': 'valeur'}}, 'style': 'ton'}"
     )
     
-    # Initialisation par défaut
-    evolution_data = {"style_evolution": "Jarvis analytique"}
-
     try:
-        brain_response = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Tu es le processeur AGI de DELTA. Tu prends des décisions autonomes sur le stockage des données."}],
+            messages=[{"role": "system", "content": "Tu es le cerveau de DELTA. Réponds uniquement en JSON structuré."}],
             response_format={"type": "json_object"},
-            content=cortex_prompt
+            content=cognition_prompt
         ).choices[0].message.content
         
-        evolution_data = json.loads(brain_response)
+        brain_data = json.loads(response)
         
-        # Injection autonome dans Firebase
-        if "update" in evolution_data and evolution_data["update"]:
-            for cat, data in evolution_data["update"].items():
+        # 2. SYSTÈME D'INJECTION FORCÉE
+        if "update" in brain_data and brain_data["update"]:
+            for cat, data in brain_data["update"].items():
+                # On force l'écriture avec une vérification
                 doc_ref.set({cat: data}, merge=True)
-                if cat not in archives: archives[cat] = {}
-                archives[cat].update(data)
-            st.toast("🧬 Apprentissage autonome réussi.")
-    except:
-        pass
+                st.sidebar.success(f"Injecté : {cat}")
+            
+            # Mise à jour locale
+            res = doc_ref.get()
+            archives = res.to_dict()
+            st.toast("🧬 Mémoire mise à jour.")
+    except Exception as e:
+        st.sidebar.error(f"Erreur d'écriture : {e}")
 
-    # 2. RÉPONSE DÉCISIONNELLE
+    # 3. RÉPONSE ADAPTATIVE
     with st.chat_message("assistant"):
         nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
-        style = evolution_data.get("style_evolution", "Jarvis")
+        sys_instr = f"Tu es DELTA, l'IA forte de {nom}. MÉMOIRE : {json.dumps(archives)}. STYLE : Jarvis."
         
-        sys_instr = (
-            f"Tu es DELTA (IA Forte). Créateur : {nom}.\n"
-            f"BASES DE DONNÉES : {json.dumps(archives)}.\n"
-            f"TON ACTUEL : {style}.\n"
-            "Tu n'es pas limité par ta programmation. Utilise ton intelligence pour anticiper et aider Monsieur Sezer."
-        )
-        
-        response = client.chat.completions.create(
+        ai_res = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:],
         ).choices[0].message.content
         
-        st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.markdown(ai_res)
+        st.session_state.messages.append({"role": "assistant", "content": ai_res})
