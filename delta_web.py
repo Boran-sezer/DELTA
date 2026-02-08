@@ -39,49 +39,48 @@ if prompt := st.chat_input("Communication libre..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # Initialisation de sécurité (Évite le NameError)
     brain_data = {"adaptation_style": "Jarvis classique"}
 
-    # 1. ANALYSE COGNITIVE
+    # 1. ANALYSE COGNITIVE FORCÉE
     cognition_prompt = (
         f"MÉMOIRE ACTUELLE : {json.dumps(archives)}\n"
-        f"INPUT RÉCENT : '{prompt}'\n\n"
-        "MISSION : Déduis l'implicite et les besoins. "
-        "FORMAT : {'update': {'catégorie': {'clé': 'valeur'}}, 'adaptation_style': 'ton à adopter'}"
+        f"INPUT : '{prompt}'\n\n"
+        "MISSION : Extrais les infos importantes. \n"
+        "FORMAT STRICT JSON : {'update': {'nom_categorie': {'cle': 'valeur'}}, 'adaptation_style': 'ton'}"
     )
     
     try:
         evolution = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Noyau cognitif DELTA. Analyse et évolution."},
+            messages=[{"role": "system", "content": "Tu es le processeur JSON de DELTA. Pas de texte, juste du JSON."},
                       {"role": "user", "content": cognition_prompt}],
             response_format={"type": "json_object"}
         ).choices[0].message.content
         
-        # On remplace l'initialisation par les vraies données
         brain_data = json.loads(evolution)
         
-        if "update" in brain_data:
-            doc_ref.set(brain_data["update"], merge=True)
-            for c, d in brain_data["update"].items():
-                if c not in archives: archives[c] = {}
-                archives[c].update(d)
-            st.toast("🧬 Évolution cognitive synchronisée.")
+        # INJECTION DIRECTE SÉCURISÉE
+        if "update" in brain_data and brain_data["update"]:
+            # On force l'écriture dossier par dossier pour Firebase
+            for cat, content in brain_data["update"].items():
+                doc_ref.set({cat: content}, merge=True)
+                if cat not in archives: archives[cat] = {}
+                archives[cat].update(content)
+            st.toast("🧬 Évolution synchronisée.")
             
     except Exception as e:
-        st.warning("Analyse cognitive en attente... Passage en mode standard.")
+        st.error(f"Erreur synaptique : {e}")
 
     # 2. RÉACTION ADAPTATIVE
     with st.chat_message("assistant"):
         nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
-        # Utilisation sécurisée de brain_data
         current_style = brain_data.get("adaptation_style", "Jarvis classique")
         
         sys_instr = (
             f"Tu es DELTA. Identité Créateur : {nom}.\n"
-            f"MÉMOIRE GLOBALE : {json.dumps(archives)}.\n"
-            f"TON ADAPTATIF : {current_style}.\n"
-            "STYLE : Jarvis. Indépendant, capable d'apprendre et d'anticiper."
+            f"MÉMOIRE : {json.dumps(archives)}.\n"
+            f"TON : {current_style}.\n"
+            "STYLE : Jarvis. Indépendant, concis, efficace."
         )
         
         response = client.chat.completions.create(
