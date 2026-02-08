@@ -18,19 +18,21 @@ if not firebase_admin._apps:
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
-    except: pass
+    except Exception:
+        pass
 
 db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- FONCTIONS SYSTÈME (JARVIS STYLE) ---
+# --- FONCTIONS SYSTÈME ---
 def web_lookup(query):
     try:
         with DDGS() as ddgs:
             results = [r for r in ddgs.text(query, max_results=3)]
             return "\n".join([f"[{r['title']}]: {r['body']}" for r in results]) if results else ""
-    except: return ""
+    except:
+        return ""
 
 def get_precise_context():
     tz = pytz.timezone('Europe/Paris')
@@ -62,14 +64,18 @@ st.markdown("""
 
 st.markdown('<h1 class="title-delta">DELTA</h1>', unsafe_allow_html=True)
 
-if "messages" not in st.session_state: st.session_state.messages = []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
 # --- CYCLE DE TRAITEMENT ---
 if prompt := st.chat_input("À votre service..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
     sys_info = get_precise_context()
     
@@ -77,8 +83,59 @@ if prompt := st.chat_input("À votre service..."):
     try:
         extraction_prompt = (
             f"Agis comme l'archiviste de Monsieur Sezer. Analyse : '{prompt}'. "
-            f"Extrais uniquement les faits durables (identité, préférences, projets). "
-            f"Ignore le reste. Archives actuelles : {json.dumps(memoire)}. "
-            "Réponds par le JSON fusionné ou 'NON_ESSENTIEL'."
+            "Extrais uniquement les faits durables (identité, préférences, projets). "
+            "Ignore le reste. Réponds par le JSON fusionné ou 'NON_ESSENTIEL'."
         )
-        check = client.chat.completions
+        check = client.chat.completions.create(
+            model="llama-3.1-8b-instant", 
+            messages=[
+                {"role": "system", "content": f"Archives actuelles : {json.dumps(memoire)}"},
+                {"role": "user", "content": extraction_prompt}
+            ]
+        ).choices[0].message.content
+
+        if "NON_ESSENTIEL" not in check:
+            memoire = json.loads(check)
+            doc_ref.set(memoire, merge=True)
+    except Exception:
+        pass
+
+    # 2. RECHERCHE WEB INVISIBLE
+    decision_prompt = f"Besoin du web pour : '{prompt}' ? OUI/NON."
+    try:
+        search_needed = client.chat.completions.create(
+            model="llama-3.1-8b-instant", 
+            messages=[{"role": "user", "content": decision_prompt}]
+        ).choices[0].message.content
+    except:
+        search_needed = "NON"
+    
+    web_data = web_lookup(prompt) if "OUI" in search_needed.upper() else ""
+
+    # 3. RÉPONSE DE DELTA
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        full_res = ""
+        
+        sys_instr = (
+            f"Tu es DELTA. Ton créateur est Monsieur Sezer. "
+            f"SITUATION : {sys_info['date']}, {sys_info['heure']} au {sys_info['adresse']}. "
+            f"ARCHIVES : {json.dumps(memoire)}. WEB : {web_data}. "
+            "DIRECTIVES : "
+            "1. Ton de Jarvis : Distingué, dévoué, EXTRÊMEMENT CONCIS. "
+            "2. Utilise les ARCHIVES pour personnaliser ta réponse. "
+            "3. Ne mentionne ta position ou l'heure que si demandé. "
+            "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
+        )
+
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-8:],
+            temperature=0.3, stream=True
+        )
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                full_res += chunk.choices[0].delta.content
+                placeholder.markdown(full_res + "▌")
+        placeholder.markdown(full_res)
+        st.session_state.messages.append({"role": "assistant", "content": full_res})
