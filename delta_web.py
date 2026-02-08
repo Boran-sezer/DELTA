@@ -15,80 +15,82 @@ if not firebase_admin._apps:
         cred = credentials.Certificate(json.loads(decoded_json))
         firebase_admin.initialize_app(cred)
     except Exception as e:
-        st.error(f"Erreur d'accès aux serveurs : {e}")
+        st.error(f"Erreur d'accès : {e}")
 
 db = firestore.client()
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- CHARGEMENT IMMÉDIAT (Pour être prêt dès l'ouverture) ---
-def charger_memoire():
-    res = doc_ref.get()
-    if res.exists:
-        return res.to_dict()
-    # Structure initiale si vide
-    initial = {"profil": {"nom": "Monsieur Sezer", "role": "Créateur"}, "projets": {}, "preferences": {}}
-    doc_ref.set(initial)
-    return initial
+# --- INITIALISATION SYSTÈME ---
+res = doc_ref.get()
+archives = res.to_dict() if res.exists else {
+    "profil": {"nom": "Sezer", "role": "Créateur"},
+    "projets": {},
+    "preferences": {}
+}
 
-archives = charger_memoire()
-
-# --- INTERFACE STYLE TERMINAL ---
+# --- INTERFACE ---
 st.set_page_config(page_title="DELTA", page_icon="🦾")
-st.markdown("<style>#MainMenu, footer, header {visibility:hidden;} .stChatFloatingInputContainer {padding-bottom: 20px;}</style>", unsafe_allow_html=True)
+st.title("DELTA - Hybrid Intelligence")
 
 if "messages" not in st.session_state:
-    # DELTA sait qui vous êtes dès le premier message interne
     st.session_state.messages = []
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- MOTEUR DE TRAITEMENT ---
-if prompt := st.chat_input("En attente d'ordres..."):
+# --- CORE LOGIC ---
+if prompt := st.chat_input("Ordre direct..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. TRIEUR INTELLIGENT (Logique Lux)
-    filtre_prompt = (
-        f"ARCHIVES ACTUELLES : {json.dumps(archives)}\n"
-        f"ORDRE : '{prompt}'\n"
-        "MISSION : Analyse si l'ordre contient une info à mémoriser ou à supprimer.\n"
-        "RETOURNE UNIQUEMENT UN JSON :\n"
-        "- Pour mémoriser : {'update': {'categorie': {'clé': 'valeur'}}}\n"
-        "- Pour supprimer : {'delete': {'categorie': 'clé'}}\n"
-        "- Sinon : {}"
-    )
-    
-    analyse = client.chat.completions.create(
+    # 1. LE GARDIEN (Llama 8B - Économe)
+    # Détecte si une action sur la mémoire est requise
+    check_prompt = f"Le message '{prompt}' demande-t-il de mémoriser une info ou d'en supprimer une ? Réponds par OUI ou NON."
+    check = client.chat.completions.create(
         model="llama-3.1-8b-instant",
-        messages=[{"role": "system", "content": "Tu es le processeur de données de DELTA. JSON pur uniquement."},
-                  {"role": "user", "content": filtre_prompt}],
-        response_format={"type": "json_object"}
+        messages=[{"role": "user", "content": check_prompt}]
     ).choices[0].message.content
 
-    try:
-        cmd = json.loads(analyse)
-        if "delete" in cmd:
-            cat, key = list(cmd["delete"].items())[0]
-            doc_ref.update({f"{cat}.{key}": firestore.DELETE_FIELD})
-            st.toast(f"Protocole d'effacement : {key}")
-        elif "update" in cmd:
-            doc_ref.set(cmd["update"], merge=True)
-            st.toast("Mémoire synchronisée.")
-            # Mise à jour immédiate du dictionnaire local
-            for cat, data in cmd["update"].items():
-                if cat in archives: archives[cat].update(data)
-    except: pass
+    # 2. L'EXPERT (Llama 70B - Précision)
+    # Activé uniquement si nécessaire pour économiser le quota
+    if "OUI" in check.upper():
+        brain_prompt = (
+            f"ARCHIVES : {json.dumps(archives)}\n"
+            f"ORDRE : '{prompt}'\n"
+            "MISSION : Extrais les infos dans ce schéma STRICT :\n"
+            "- 'profil': {'nom': '...', 'prenom': '...', 'age': ...}\n"
+            "- 'projets': {'nom_du_projet': 'description'}\n\n"
+            "Retourne un JSON avec 'update' (ajout) ou 'delete' (suppression)."
+        )
+        
+        analysis = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": "Extracteur JSON chirurgical."},
+                      {"role": "user", "content": brain_prompt}],
+            response_format={"type": "json_object"}
+        ).choices[0].message.content
+        
+        try:
+            cmd = json.loads(analysis)
+            if "update" in cmd:
+                doc_ref.set(cmd["update"], merge=True)
+                for k, v in cmd["update"].items():
+                    if k in archives: archives[k].update(v)
+                st.toast("🧬 Mémoire synchronisée (Expert 70B)")
+            elif "delete" in cmd:
+                cat, key = list(cmd["delete"].items())[0]
+                doc_ref.update({f"{cat}.{key}": firestore.DELETE_FIELD})
+                st.toast("🗑️ Donnée effacée.")
+        except: pass
 
-    # 2. RÉPONSE DE DELTA (Style Jarvis Pur)
+    # 3. RÉPONSE JARVIS (Llama 70B)
     with st.chat_message("assistant"):
-        nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
         sys_instr = (
-            f"Tu es DELTA, l'IA de {nom}. Ton créateur est Monsieur Sezer.\n"
-            f"MÉMOIRE : {json.dumps(archives)}\n"
-            "TON : Jarvis. Précis, dévoué, ultra-concis. "
-            "Tu connais parfaitement Monsieur Sezer grâce aux ARCHIVES ci-dessus."
+            f"Tu es DELTA, l'IA de Monsieur Sezer. "
+            f"MÉMOIRE : {json.dumps(archives)}. "
+            "TON : Jarvis. Précis, distingué, extrêmement concis. "
+            "Ne salue pas si la conversation est déjà engagée. Va à l'essentiel."
         )
         
         res_ai = client.chat.completions.create(
