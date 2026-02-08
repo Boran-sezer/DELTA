@@ -5,9 +5,10 @@ from firebase_admin import credentials, firestore
 import base64, json, hashlib
 from datetime import datetime, timedelta
 
-# --- INITIALISATION FIREBASE ---
+# --- INITIALISATION FIREBASE (MÉTHODE SÉCURISÉE DELTA) ---
 if not firebase_admin._apps:
     try:
+        # Récupération et décodage de la clé depuis vos secrets Streamlit
         encoded = st.secrets["firebase_key"]["encoded_key"].strip()
         decoded_json = base64.b64decode(encoded).decode("utf-8")
         cred_dict = json.loads(decoded_json)
@@ -23,7 +24,7 @@ USER_ID = "monsieur_sezer"
 # --- INITIALISATION GROQ ---
 client = Groq(api_key="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")
 
-# --- UTILITAIRES MÉMOIRE ---
+# --- UTILITAIRES MÉMOIRE (VOTRE LOGIQUE ULTRA) ---
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -79,11 +80,14 @@ def cleanup_old_memories(days=30):
     """Supprime les souvenirs trop vieux ou peu prioritaires"""
     cutoff = datetime.utcnow() - timedelta(days=days)
     mem_ref = db.collection("users").document(USER_ID).collection("memory")
-    docs = mem_ref.stream()
-    for d in docs:
-        data = d.to_dict()
-        if data.get("priority","low")=="low" and data.get("created_at") < cutoff:
-            mem_ref.document(d.id).delete()
+    try:
+        docs = mem_ref.stream()
+        for d in docs:
+            data = d.to_dict()
+            if data.get("priority","low")=="low" and data.get("created_at") < cutoff:
+                mem_ref.document(d.id).delete()
+    except:
+        pass
 
 def summarize_context(memories, max_chars=500):
     """Résumé intelligent des souvenirs récents pour le LLM"""
@@ -107,7 +111,7 @@ with st.sidebar:
     else:
         st.info("Aucun souvenir enregistré.")
     if st.button("🔄 Actualiser"):
-        recent_memories = get_memories(limit=20)
+        st.rerun()
 
 # Session state pour le chat
 if "messages" not in st.session_state:
@@ -160,3 +164,5 @@ if prompt := st.chat_input("Parlez à Jarvis..."):
             st.session_state.messages.append({"role": "assistant", "content": response})
         except Exception as e:
             st.error(f"Erreur Groq : {e}")
+    
+    st.rerun()
