@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 import pytz
 
-# --- CONFIGURATION API ---
+# --- CONFIGURATION ---
 GROQ_API_KEY = "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"
 
 # --- INITIALISATION FIREBASE ---
@@ -24,7 +24,7 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- NAVIGATION WEB INVISIBLE ---
+# --- FONCTIONS SYSTÈME ---
 def web_lookup(query):
     try:
         with DDGS() as ddgs:
@@ -32,16 +32,10 @@ def web_lookup(query):
             return "\n".join([f"[{r['title']}]: {r['body']}" for r in results]) if results else ""
     except: return ""
 
-# --- CONTEXTE SYSTÈME FORCE ---
 def get_system_context():
-    # Force l'heure exacte de Paris pour Monsieur Sezer
     tz = pytz.timezone('Europe/Paris')
     now = datetime.now(tz)
-    return {
-        "date_complete": now.strftime("%A %d %B %Y"),
-        "heure_actuelle": now.strftime("%H:%M"),
-        "ville": "Annecy, France"
-    }
+    return {"date_complete": now.strftime("%A %d %B %Y"), "heure_actuelle": now.strftime("%H:%M"), "ville": "Annecy, France"}
 
 # --- CHARGEMENT MÉMOIRE ---
 res = doc_ref.get()
@@ -61,47 +55,55 @@ if prompt := st.chat_input("À votre service..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. Capture immédiate du temps et du lieu
     sys_info = get_system_context()
     
-    # 2. Recherche Web (Silencieuse et sans indicateur)
+    # 1. Recherche Web Invisible
     decision_prompt = f"Context: {sys_info}. Query: '{prompt}'. Web search needed? OUI/NON."
     try:
         search_needed = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"user", "content": decision_prompt}]).choices[0].message.content
     except: search_needed = "NON"
     
-    web_data = ""
-    if "OUI" in search_needed.upper():
-        web_data = web_lookup(prompt)
+    web_data = web_lookup(prompt) if "OUI" in search_needed.upper() else ""
 
-    # 3. Mise à jour Mémoire
+    # 2. FILTRE INTELLIGENT DE MÉMOIRE (Évite d'archiver n'importe quoi)
+    # On ne stocke que si c'est une info personnelle, un projet ou une préférence.
     try:
-        m_upd = f"Mémoire: {json.dumps(memoire)}. Info: {prompt}. Mets à jour le JSON."
-        check = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"system","content":"JSON only."},{"role":"user","content":m_upd}], response_format={"type":"json_object"})
-        memoire = json.loads(check.choices[0].message.content)
-        doc_ref.set(memoire, merge=True)
+        filter_instr = (
+            f"Analyse ce message : '{prompt}'. "
+            "S'agit-il d'une information importante à retenir sur Monsieur Sezer ou ses projets ? "
+            "Si c'est juste une question sur l'heure, la météo ou une politesse, réponds 'NON'. "
+            "Si c'est important, réponds par le JSON de la mémoire mis à jour."
+        )
+        check = client.chat.completions.create(
+            model="llama-3.1-8b-instant", 
+            messages=[{"role":"system","content":"Tu es un trieur de données. Réponds soit 'NON', soit le JSON."},{"role":"user","content":f"Mémoire actuelle: {json.dumps(memoire)}. {filter_instr}"}]
+        ).choices[0].message.content
+
+        if "NON" not in check.upper():
+            memoire = json.loads(check)
+            doc_ref.set(memoire, merge=True)
     except: pass
 
-    # 4. Réponse DELTA (Identité et Données Verrouillées)
+    # 3. Réponse DELTA
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_res = ""
         
         sys_instr = (
-            f"Tu es DELTA, l'IA de Monsieur Sezer (Sezer Boran). "
-            f"VÉRITÉS ABSOLUES : Aujourd'hui nous sommes le {sys_info['date_complete']}, il est précisément {sys_info['heure_actuelle']} à {sys_info['ville']}. "
+            f"Tu es DELTA, l'IA de Monsieur Sezer (Ton créateur). "
+            f"INFOS SYSTÈME : {sys_info['date_complete']}, {sys_info['heure_actuelle']} à {sys_info['ville']}. "
             f"ARCHIVES : {json.dumps(memoire)}. WEB : {web_data}. "
             "DIRECTIVES : "
-            "1. Tu es très poli, distingué et CONCIS. "
-            "2. Tu n'annonces jamais que tu cherches ou que tu as accès à l'heure, tu utilises ces données si Monsieur Sezer te le demande. "
-            "3. Tu es fier d'être la création de Monsieur Sezer. "
+            "1. Très poli, distingué et EXTRÊMEMENT CONCIS. "
+            "2. Ne mentionne l'heure/date que si on te le demande. "
+            "3. Tu es DELTA, Monsieur Sezer est ton développeur. Ne confonds pas les rôles. "
             "4. Ne termine par 'Monsieur Sezer' que si tu ne l'as pas cité avant."
         )
 
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-8:],
-            temperature=0.3, stream=True
+            temperature=0.2, stream=True
         )
         for chunk in stream:
             if chunk.choices[0].delta.content:
