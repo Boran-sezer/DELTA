@@ -18,7 +18,7 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# --- INITIALISATION GROQ (Nouvelle clé) ---
+# --- INITIALISATION GROQ ---
 client = Groq(api_key="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")
 
 USER_ID = "monsieur_sezer"
@@ -35,58 +35,66 @@ def is_memory_worthy(text: str) -> bool:
 st.set_page_config(page_title="DELTA AGI", page_icon="🌐", layout="wide")
 st.title("🌐 DELTA : Système AGI")
 
-# --- RÉCUPÉRATION DU CONTEXTE ---
 mem_ref = db.collection("users").document(USER_ID).collection("memory")
-try:
-    memories = mem_ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(10).stream()
-    context_list = [m.to_dict() for m in memories]
-except Exception:
-    context_list = []
+
+# --- RÉCUPÉRATION DU CONTEXTE ---
+def get_recent_memories(limit=10):
+    try:
+        memories = mem_ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit).stream()
+        return [m.to_dict() for m in memories]
+    except Exception:
+        return []
+
+context_list = get_recent_memories()
 
 with st.sidebar:
-    st.header("🧠 Mémoire Vive (Hash)")
+    st.header("🧠 Mémoire Vive")
     for m in context_list:
         st.caption(f"[{m.get('category')}] {m.get('content')}")
     if st.button("🔄 Actualiser"):
-        st.rerun()
+        st.experimental_rerun()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# --- AFFICHAGE DU CHAT ---
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# --- PROCESSUS ---
+# --- PROCESSUS PRINCIPAL ---
 if prompt := st.chat_input("En attente de vos ordres, Monsieur Sezer..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. ANALYSE ET STOCKAGE (JSON)
+    # 1. ANALYSE ET STOCKAGE
     if is_memory_worthy(prompt):
         m_hash = hash_text(prompt)
-        try:
-            analysis = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": "Tu es une IA forte. Catégorise en JSON : {'category': '...'} "},
-                    {"role": "user", "content": f"Donne une catégorie courte pour : {prompt}"}
-                ],
-                response_format={"type": "json_object"}
-            )
-            cat = json.loads(analysis.choices[0].message.content).get("category", "info")
-            
-            ref = mem_ref.document(m_hash)
-            if not ref.get().exists:
+        ref = mem_ref.document(m_hash)
+        if not ref.get().exists:
+            try:
+                analysis = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": "Tu es une IA forte. Catégorise en JSON : {'category': '...'} "},
+                        {"role": "user", "content": f"Donne une catégorie courte pour : {prompt}"}
+                    ],
+                    response_format={"type": "json_object"}
+                )
+                cat = json.loads(analysis.choices[0].message.content).get("category", "info")
                 ref.set({
                     "category": cat,
                     "content": prompt,
                     "created_at": datetime.utcnow()
                 })
-                st.toast("🧬 Synapse enregistrée.")
-        except Exception as e:
-            st.warning(f"Note : Mémoire non mise à jour ({e})")
+                st.success("🧬 Souvenir enregistré.")
+            except Exception as e:
+                st.warning(f"Mémoire non mise à jour ({e})")
 
-    # 2. RÉPONSE JARVIS
+    # 2. RÉCUPÉRATION CONTEXTE À JOUR
+    context_list = get_recent_memories()
+
+    # 3. RÉPONSE JARVIS
     with st.chat_message("assistant"):
         context_str = "\n".join([f"- {m['content']}" for m in context_list])
         sys_instr = (
@@ -94,16 +102,16 @@ if prompt := st.chat_input("En attente de vos ordres, Monsieur Sezer..."):
             f"Tes souvenirs récents sont : {context_str}. "
             "Sois concis, brillant et direct. Ne mentionne pas que tu es une IA."
         )
-        
+
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:]
             ).choices[0].message.content
-            
+
             st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
         except Exception as e:
             st.error(f"Erreur Groq : {e}")
-            
-    st.rerun()
+
+    st.experimental_rerun()
