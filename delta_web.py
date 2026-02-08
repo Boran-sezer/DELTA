@@ -24,11 +24,13 @@ def init_delta_brain():
 
 app = init_delta_brain()
 db = firestore.client() if app else None
+if not db:
+    st.error("Firebase non initialisé ! Vérifie ta clé et les règles.")
 
 # --- INITIALISATION GROQ ---
 client = Groq(api_key="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")
 
-# --- UTILITAIRES MÉMOIRE ---
+# --- UTILITAIRES ---
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -90,7 +92,7 @@ def identify_branch(text: str) -> str:
         if branch.lower() in text_lower:
             return branch
 
-    # Sinon LLM mais fallback sécurisé
+    # Fallback garanti
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -101,7 +103,6 @@ def identify_branch(text: str) -> str:
             response_format={"type": "text"}
         )
         branch_name = analysis.choices[0].message.content.strip()
-        # Sécurisation branch_name
         if not branch_name or any(c in branch_name for c in "/\\.#$[]"):
             branch_name = "Memory"
         return branch_name.replace(" ", "_")
@@ -142,10 +143,10 @@ def is_memory_worthy(text: str) -> dict:
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI Ultimate", page_icon="🌐", layout="wide")
-st.title("🌐 DELTA : Jarvis Légendaire (Fusion Personnes/Thèmes)")
+st.title("🌐 DELTA : Jarvis Prêt à Tout")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres. Jarvis est synchronisé et prêt."}]
+    st.session_state.messages = [{"role": "assistant", "content": "Jarvis est en ligne et prêt à mémoriser intelligemment."}]
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
@@ -170,6 +171,7 @@ if prompt := st.chat_input("Commandez Jarvis..."):
                 "branch": branch_name,
                 "created_at": datetime.utcnow()
             }, merge=True)
+            st.toast(f"🧠 Info mémorisée dans {branch_name}")
         except Exception as e:
             st.error(f"Erreur écriture Firebase : {e}")
 
@@ -177,7 +179,7 @@ if prompt := st.chat_input("Commandez Jarvis..."):
 
     with st.chat_message("assistant"):
         ctx = summarize_context(branch_name)
-        sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Réponds de façon ultra pertinente, concise et bluffante."
+        sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Réponds de façon ultra pertinente et concise."
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
