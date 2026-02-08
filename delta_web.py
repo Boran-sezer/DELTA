@@ -28,7 +28,7 @@ archives = res.to_dict() if res.exists else {}
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA", page_icon="🦾")
 st.markdown("<style>#MainMenu, footer, header {visibility:hidden;}</style>", unsafe_allow_html=True)
-st.title("DELTA - Core Intelligence")
+st.title("DELTA - Core Operation")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -41,23 +41,21 @@ if prompt := st.chat_input("Ordre direct..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. EXTRACTION DYNAMIQUE & FORCÉE (Llama 70B)
+    # 1. EXTRACTION PURIFIÉE (Llama 70B)
     brain_prompt = (
-        f"ARCHIVES ACTUELLES : {json.dumps(archives)}\n"
-        f"ORDRE : '{prompt}'\n"
-        "MISSION : Analyse le message pour la mémoire.\n"
-        "1. MISE À JOUR : Si l'info est nouvelle ou différente (ex: changement d'âge), extrais-la impérativement.\n"
-        "2. RANGEMENT : Utilise 'profil', 'projets' ou 'preferences' par défaut. "
-        "Si l'info est hors-sujet, crée une NOUVELLE catégorie logique.\n"
-        "3. SUPPRESSION : Si l'utilisateur veut oublier une info, réponds {'delete': {'catégorie': 'clé'}}.\n"
-        "FORMAT : {'update': {'categorie': {'clé': 'valeur'}}} ou {'delete': ...}.\n"
-        "Réponds UNIQUEMENT en JSON pur."
+        f"ARCHIVES : {json.dumps(archives)}\n"
+        f"MESSAGE : '{prompt}'\n\n"
+        "MISSION : Extrais les faits réels. \n"
+        "INTERDICTIONS :\n"
+        "- Ne jamais enregistrer de salutations (salut, bonjour).\n"
+        "- Ne jamais enregistrer les mots techniques (mission, ordre, analyse, greeting).\n"
+        "FORMAT : {'update': {'categorie': {'clé': 'valeur'}}} ou {'delete': {'catégorie': 'clé'}}."
     )
     
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Processeur de mémoire Delta. Rigueur absolue."},
+            messages=[{"role": "system", "content": "Extracteur JSON chirurgical. Tu ignores le bruit et les politesses."},
                       {"role": "user", "content": brain_prompt}],
             response_format={"type": "json_object"}
         ).choices[0].message.content
@@ -69,28 +67,35 @@ if prompt := st.chat_input("Ordre direct..."):
             cat, key = list(cmd["delete"].items())[0]
             doc_ref.update({f"{cat}.{key}": firestore.DELETE_FIELD})
             st.toast(f"🗑️ Archive '{key}' effacée.")
-            if cat in archives and key in archives[cat]: del archives[cat][key]
+            if cat in archives: archives[cat].pop(key, None)
             
-        # Action : Mise à jour (ou création de catégorie)
+        # Action : Mise à jour avec filtrage final
         elif "update" in cmd:
-            doc_ref.set(cmd["update"], merge=True)
+            clean_update = {}
             for cat, data in cmd["update"].items():
-                if cat not in archives: archives[cat] = {}
-                archives[cat].update(data)
-            st.toast("🧬 Mémoire synchronisée.")
+                # On élimine les clés interdites manuellement pour sécurité
+                clean_data = {k: v for k, v in data.items() if k.lower() not in ["mission", "ordre", "analyse", "greeting"]}
+                if clean_data:
+                    clean_update[cat] = clean_data
+            
+            if clean_update:
+                doc_ref.set(clean_update, merge=True)
+                for cat, data in clean_update.items():
+                    if cat not in archives: archives[cat] = {}
+                    archives[cat].update(data)
+                st.toast("🧬 Mémoire synchronisée.")
     except:
         pass
 
     # 2. RÉPONSE JARVIS (Llama 70B)
     with st.chat_message("assistant"):
-        # Identification dynamique
         nom_appel = archives.get("profil", {}).get("nom", "Monsieur Sezer")
         
         sys_instr = (
-            f"Tu es DELTA, l'intelligence artificielle de {nom_appel}. "
+            f"Tu es DELTA, l'IA de {nom_appel}. "
             f"ARCHIVES : {json.dumps(archives)}. "
-            "STYLE : Jarvis. Précis, dévoué, extrêmement concis. "
-            "Réponds directement. Si aucune action n'est requise, confirme simplement l'exécution."
+            "STYLE : Jarvis. Précis, distingué, ultra-concis. "
+            "Réponds directement sans politesse inutile si la conversation est lancée."
         )
         
         res_ai = client.chat.completions.create(
