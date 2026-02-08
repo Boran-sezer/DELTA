@@ -24,7 +24,6 @@ def init_delta_brain():
 
 app = init_delta_brain()
 db = firestore.client() if app else None
-USER_ID = "monsieur_sezer"
 
 # --- INITIALISATION GROQ ---
 client = Groq(api_key="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")
@@ -50,16 +49,6 @@ def is_memory_worthy(text: str) -> dict:
     except:
         return {"is_worthy": False, "priority": "low", "branch": "Général"}
 
-def get_memories(limit=50):
-    if not db: return []
-    try:
-        docs = db.collection("users").document(USER_ID).collection("memory") \
-                 .order_by("created_at", direction=firestore.Query.DESCENDING) \
-                 .limit(limit).stream()
-        return [d.to_dict() for d in docs]
-    except:
-        return []
-
 def merge_similar_memories(memories):
     merged = []
     seen_hashes = set()
@@ -73,25 +62,43 @@ def merge_similar_memories(memories):
 def cleanup_old_memories(days=30):
     if not db: return
     cutoff = datetime.utcnow() - timedelta(days=days)
-    mem_ref = db.collection("users").document(USER_ID).collection("memory")
-    for d in mem_ref.stream():
-        data = d.to_dict()
-        if data.get("priority","low")=="low" and data.get("created_at") < cutoff:
-            mem_ref.document(d.id).delete()
+    memory_ref = db.collection("memory")
+    for branch_doc in memory_ref.stream():  # pour chaque branche/personne
+        souvenirs_ref = branch_doc.reference.collection("souvenirs")
+        for doc in souvenirs_ref.stream():
+            data = doc.to_dict()
+            created_at = data.get("created_at")
+            if created_at and hasattr(created_at, "timestamp"):
+                created_at = created_at.to_datetime()
+            elif not created_at:
+                continue
+            if data.get("priority","low")=="low" and created_at < cutoff:
+                souvenirs_ref.document(doc.id).delete()
 
-def summarize_context(memories, max_chars=500):
+def get_memories(branch_name, limit=50):
+    if not db: return []
+    try:
+        docs = db.collection("memory").document(branch_name).collection("souvenirs") \
+                 .order_by("created_at", direction=firestore.Query.DESCENDING) \
+                 .limit(limit).stream()
+        return [d.to_dict() for d in docs]
+    except:
+        return []
+
+def summarize_context(branch_name, max_chars=500):
+    memories = get_memories(branch_name, limit=50)
     if not memories: return "Aucun souvenir récent."
     memories = sorted(memories, key=lambda x: {"high":3,"medium":2,"low":1}.get(x.get("priority","medium")), reverse=True)
     merged = merge_similar_memories(memories)
     lines = [f"[{m.get('priority')}] {m.get('content')}" for m in merged]
     return "\n".join(lines)[:max_chars]
 
-# --- INTERFACE SILENCIEUSE ---
+# --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI Ultra", page_icon="🌐", layout="wide")
 st.title("🌐 DELTA : Jarvis Ultra-Intelligent")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres, Monsieur Sezer."}]
+    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres. Le système est parfaitement synchronisé."}]
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
@@ -103,27 +110,30 @@ if prompt := st.chat_input("Commandez Jarvis..."):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse et écriture automatique silencieuse
+    # Déterminer la branche : personne ou thème
     mem_analysis = is_memory_worthy(prompt)
+    branch_name = mem_analysis.get("branch", "Général")  # ex: "monsieur_sezer", "jules", "projets", etc.
+    doc_hash = hash_text(prompt)
+
+    # Écriture silencieuse
     if db:
-        m_hash = hash_text(prompt)
         try:
-            db.collection("users").document(USER_ID).collection("memory").document(m_hash).set({
+            db.collection("memory").document(branch_name).collection("souvenirs").document(doc_hash).set({
                 "content": prompt,
-                "content_hash": m_hash,
+                "content_hash": doc_hash,
                 "priority": mem_analysis.get("priority","medium"),
-                "branch": mem_analysis.get("branch","Général"),
+                "branch": branch_name,
                 "created_at": datetime.utcnow()
             }, merge=True)
         except:
-            pass  # Rien à afficher, tout est silencieux
+            pass
 
     cleanup_old_memories()  # Nettoyage automatique
 
-    # Réponse Jarvis avec contexte
+    # Réponse Jarvis avec contexte de la branche
     with st.chat_message("assistant"):
-        ctx = summarize_context(get_memories(limit=10))
-        sys_instr = f"Tu es Jarvis. Créateur: Monsieur Sezer. Contexte: {ctx}. Sois concis, intelligent et pertinent."
+        ctx = summarize_context(branch_name)
+        sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Sois concis, intelligent et pertinent."
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
