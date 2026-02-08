@@ -21,17 +21,13 @@ db = firestore.client()
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- INITIALISATION SYSTÈME ---
+# --- CHARGEMENT DYNAMIQUE (Pas de pré-création) ---
 res = doc_ref.get()
-archives = res.to_dict() if res.exists else {
-    "profil": {"nom": "Sezer", "role": "Créateur"},
-    "projets": {},
-    "preferences": {}
-}
+archives = res.to_dict() if res.exists else {}
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA", page_icon="🦾")
-st.title("DELTA - Hybrid Intelligence")
+st.title("DELTA - Architecture Organique")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -39,34 +35,31 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- CORE LOGIC ---
-if prompt := st.chat_input("Ordre direct..."):
+# --- CORE ENGINE ---
+if prompt := st.chat_input("En attente d'ordres..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. LE GARDIEN (Llama 8B - Économe)
-    # Détecte si une action sur la mémoire est requise
-    check_prompt = f"Le message '{prompt}' demande-t-il de mémoriser une info ou d'en supprimer une ? Réponds par OUI ou NON."
+    # 1. LE GARDIEN (Vérifie si une mémorisation est utile)
+    check_prompt = f"Analyse : '{prompt}'. L'utilisateur donne-t-il une info à mémoriser ? Réponds par OUI ou NON."
     check = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[{"role": "user", "content": check_prompt}]
     ).choices[0].message.content
 
-    # 2. L'EXPERT (Llama 70B - Précision)
-    # Activé uniquement si nécessaire pour économiser le quota
-    if "OUI" in check.upper():
+    # 2. L'EXPERT (70B) - Crée les structures uniquement si besoin
+    if "OUI" in check.upper() or any(x in prompt.lower() for x in ["nom", "prénom", "âge", "projet", "aime"]):
         brain_prompt = (
-            f"ARCHIVES : {json.dumps(archives)}\n"
+            f"ARCHIVES ACTUELLES : {json.dumps(archives)}\n"
             f"ORDRE : '{prompt}'\n"
-            "MISSION : Extrais les infos dans ce schéma STRICT :\n"
-            "- 'profil': {'nom': '...', 'prenom': '...', 'age': ...}\n"
-            "- 'projets': {'nom_du_projet': 'description'}\n\n"
-            "Retourne un JSON avec 'update' (ajout) ou 'delete' (suppression)."
+            "MISSION : Identifie l'information et crée une catégorie logique (ex: profil, projets, etc.). "
+            "Format attendu : {'update': {'NOM_CATEGORIE': {'CLE': 'VALEUR'}}} "
+            "Réponds UNIQUEMENT en JSON."
         )
         
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Extracteur JSON chirurgical."},
+            messages=[{"role": "system", "content": "Extracteur JSON intelligent."},
                       {"role": "user", "content": brain_prompt}],
             response_format={"type": "json_object"}
         ).choices[0].message.content
@@ -74,23 +67,25 @@ if prompt := st.chat_input("Ordre direct..."):
         try:
             cmd = json.loads(analysis)
             if "update" in cmd:
+                # doc_ref.set avec merge=True créera le dossier s'il n'existe pas
                 doc_ref.set(cmd["update"], merge=True)
-                for k, v in cmd["update"].items():
-                    if k in archives: archives[k].update(v)
-                st.toast("🧬 Mémoire synchronisée (Expert 70B)")
-            elif "delete" in cmd:
-                cat, key = list(cmd["delete"].items())[0]
-                doc_ref.update({f"{cat}.{key}": firestore.DELETE_FIELD})
-                st.toast("🗑️ Donnée effacée.")
+                # Mise à jour de la mémoire locale pour la réponse immédiate
+                for cat, data in cmd["update"].items():
+                    if cat not in archives: archives[cat] = {}
+                    archives[cat].update(data)
+                st.toast("🧬 Structure créée et synchronisée.")
         except: pass
 
-    # 3. RÉPONSE JARVIS (Llama 70B)
+    # 3. RÉPONSE JARVIS
     with st.chat_message("assistant"):
+        # On cherche le nom si présent, sinon valeur par défaut
+        nom_appel = archives.get("profil", {}).get("nom", "Monsieur Sezer")
+        
         sys_instr = (
-            f"Tu es DELTA, l'IA de Monsieur Sezer. "
-            f"MÉMOIRE : {json.dumps(archives)}. "
-            "TON : Jarvis. Précis, distingué, extrêmement concis. "
-            "Ne salue pas si la conversation est déjà engagée. Va à l'essentiel."
+            f"Tu es DELTA. Créateur : {nom_appel}. "
+            f"MÉMOIRE ACTUELLE (peut être vide) : {json.dumps(archives)}. "
+            "STYLE : Jarvis. Précis, dévoué, ultra-concis. "
+            "Si la mémoire est vide, reste poli et attends les ordres."
         )
         
         res_ai = client.chat.completions.create(
