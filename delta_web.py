@@ -13,9 +13,8 @@ if not firebase_admin._apps:
         cred_dict = json.loads(decoded_json)
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
-        st.success("✅ Firebase initialisé avec succès !")
     except Exception as e:
-        st.error(f"Erreur Firebase : {e}")
+        st.error(f"Erreur d'initialisation Firebase : {e}")
         st.stop()
 
 db = firestore.client()
@@ -29,42 +28,39 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 def write_memory(content: str, priority="medium", branch="Général"):
-    """Écrit un souvenir dans Firestore avec debug"""
+    """Écrit un souvenir dans Firestore avec validation immédiate"""
     if not content.strip():
-        st.warning("Le contenu est vide, rien à écrire.")
         return False
-    m_hash = hash_text(content)
-    doc_ref = db.collection("users").document(USER_ID).collection("memory").document(m_hash)
     try:
-        doc_ref.set({
+        m_hash = hash_text(content)
+        # Chemin conforme à votre structure : users -> monsieur_sezer -> memory
+        doc_ref = db.collection("users").document(USER_ID).collection("memory").document(m_hash)
+        
+        data = {
             "content": content,
             "content_hash": m_hash,
             "priority": priority,
             "branch": branch,
             "created_at": datetime.utcnow()
-        })
-        st.success(f"🧬 Souvenir mémorisé : {branch} [{priority}]")
+        }
+        doc_ref.set(data, merge=True)
+        st.toast(f"🧬 Branche {branch} mise à jour.")
         return True
     except Exception as e:
-        st.error(f"Erreur lors de l’écriture dans Firebase : {e}")
+        st.error(f"Erreur d'écriture Firebase : {e}")
         return False
 
 def is_memory_worthy(text: str) -> dict:
-    """Décide si une info mérite d'être mémorisée"""
+    """Analyse de pertinence via LLM"""
     blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
-    if len(text.strip()) < 15 or any(word in text.lower() for word in blacklist):
+    if len(text.strip()) < 10 or any(word == text.lower().strip() for word in blacklist):
         return {"is_worthy": False, "priority": "low", "branch": "Général"}
 
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": (
-                    "Tu es Jarvis, assistant intelligent de Tony Stark. "
-                    "Décide si cette info mérite d'être mémorisée. "
-                    "Réponds strictement en JSON : "
-                    "{'is_worthy': bool, 'priority': 'high|medium|low', 'branch':'nom_de_branche'}"
-                )},
+                {"role": "system", "content": "Tu es Jarvis. Analyse si l'info mérite d'être sauvée. JSON: {'is_worthy': bool, 'priority': 'high|medium|low', 'branch':'nom'}"},
                 {"role": "user", "content": text}
             ],
             response_format={"type": "json_object"}
@@ -74,44 +70,31 @@ def is_memory_worthy(text: str) -> dict:
         return {"is_worthy": False, "priority": "low", "branch": "Général"}
 
 def get_memories(limit=50):
-    """Récupère tous les souvenirs"""
+    """Récupère et nettoie les données pour Streamlit"""
     memories = []
     try:
+        # On force la lecture sur la sous-collection memory
         docs = db.collection("users").document(USER_ID).collection("memory") \
                  .order_by("created_at", direction=firestore.Query.DESCENDING) \
                  .limit(limit).stream()
-        memories = [d.to_dict() for d in docs]
+        for d in docs:
+            m = d.to_dict()
+            # Sécurité pour l'affichage Streamlit (les dates Firestore causent parfois des erreurs)
+            if 'created_at' in m and hasattr(m['created_at'], 'isoformat'):
+                m['created_at'] = m['created_at'].isoformat()
+            memories.append(m)
     except Exception as e:
-        st.error(f"Erreur récupération mémoires : {e}")
+        st.sidebar.error(f"Erreur de lecture : {e}")
     return memories
 
-def merge_similar_memories(memories):
-    """Fusionne souvenirs proches (basique)"""
-    merged = []
-    seen_hashes = set()
-    for m in memories:
-        h = m.get("content_hash")
-        if h in seen_hashes:
-            continue
-        merged.append(m)
-        seen_hashes.add(h)
-    return merged
-
-def cleanup_old_memories(days=30):
-    """Supprime les souvenirs peu prioritaires et vieux"""
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    mem_ref = db.collection("users").document(USER_ID).collection("memory")
-    docs = mem_ref.stream()
-    for d in docs:
-        data = d.to_dict()
-        if data.get("priority","low")=="low" and data.get("created_at") < cutoff:
-            mem_ref.document(d.id).delete()
-
-def summarize_context(memories, max_chars=500):
-    """Résumé intelligent pour LLM"""
-    memories = sorted(memories, key=lambda x: {"high":3,"medium":2,"low":1}.get(x.get("priority","medium")), reverse=True)
-    merged = merge_similar_memories(memories)
-    lines = [f"[{m.get('priority')}] {m.get('content')}" for m in merged]
+def summarize_context(memories, max_chars=600):
+    """Prépare le résumé pour Jarvis"""
+    if not memories: return "Aucun souvenir."
+    # Tri par priorité
+    prio_map = {"high": 3, "medium": 2, "low": 1}
+    sorted_mem = sorted(memories, key=lambda x: prio_map.get(x.get("priority", "low"), 0), reverse=True)
+    
+    lines = [f"[{m.get('branch', 'Info')}] {m.get('content')}" for m in sorted_mem[:10]]
     return "\n".join(lines)[:max_chars]
 
 # --- INTERFACE ---
@@ -119,50 +102,43 @@ st.set_page_config(page_title="DELTA AGI Ultra", page_icon="🌐", layout="wide"
 st.title("🌐 DELTA : Jarvis Ultra-Intelligent")
 
 # Sidebar
-cleanup_old_memories()
 recent_memories = get_memories(limit=20)
 with st.sidebar:
-    st.header("🧠 Mémoire Vive Jarvis")
+    st.header("🧠 Mémoire Vive")
     if recent_memories:
-        for m in recent_memories[:10]:
-            st.caption(f"[{m.get('priority')}] {m.get('content')[:50]}...")
+        for m in recent_memories:
+            with st.expander(f"📁 {m.get('branch', 'Général')}"):
+                st.write(m.get('content'))
+                st.caption(f"Priorité: {m.get('priority')}")
     else:
-        st.info("Aucun souvenir enregistré.")
-    if st.button("🔄 Actualiser"):
-        recent_memories = get_memories(limit=20)
+        st.info("Base de données en attente d'initialisation.")
+    
+    if st.button("🔄 Synchroniser"):
+        st.rerun()
 
-# Session state
+# Session state chat
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "À vos ordres, Monsieur Sezer. Jarvis est en ligne. Que souhaitez-vous ?"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Système opérationnel. À vos ordres, Monsieur Sezer."}]
 
-# Affichage chat
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- PROCESSUS PRINCIPAL ---
-if prompt := st.chat_input("Parlez à Jarvis..."):
+# --- ACTION ---
+if prompt := st.chat_input("Commandez Jarvis..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
 
-    # Vérification si info utile
-    mem_analysis = is_memory_worthy(prompt)
-    if mem_analysis.get("is_worthy"):
-        write_memory(prompt, priority=mem_analysis.get("priority","medium"), branch=mem_analysis.get("branch","Général"))
+    # 1. Analyse & Écriture
+    analysis = is_memory_worthy(prompt)
+    if analysis.get("is_worthy"):
+        write_memory(prompt, priority=analysis.get("priority"), branch=analysis.get("branch"))
 
-    # Contexte
-    recent_memories = get_memories(limit=20)
-    context_summary = summarize_context(recent_memories)
-
-    # Réponse Jarvis
+    # 2. Contexte & Réponse
+    current_memories = get_memories(limit=15)
+    ctx = summarize_context(current_memories)
+    
     with st.chat_message("assistant"):
-        sys_instr = (
-            f"Tu es Jarvis, assistant intelligent de Monsieur Sezer. "
-            f"Voici les souvenirs récents : {context_summary}. "
-            "Réponds de façon concise, intelligente, directe et pertinente. "
-            "Ne mentionne jamais que tu es une IA."
-        )
+        sys_instr = f"Tu es Jarvis. Créateur: Monsieur Sezer. Contexte récent: {ctx}. Sois brillant et concis."
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -171,4 +147,6 @@ if prompt := st.chat_input("Parlez à Jarvis..."):
             st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
         except Exception as e:
-            st.error(f"Erreur Groq : {e}")
+            st.error(f"Erreur Brain : {e}")
+
+    st.rerun()
