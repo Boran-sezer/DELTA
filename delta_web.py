@@ -1,115 +1,100 @@
 import streamlit as st
+from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
+import base64, json, hashlib
 from datetime import datetime
-import hashlib
 
-# ================= INIT FIREBASE =================
+# --- INITIALISATION ---
 if not firebase_admin._apps:
-    cred_json = st.secrets["firebase_key"]  # clé Firebase depuis Streamlit secrets
-    cred = credentials.Certificate(cred_json)
-    firebase_admin.initialize_app(cred)
+    try:
+        encoded = st.secrets["firebase_key"]["encoded_key"].strip()
+        decoded_json = base64.b64decode(encoded).decode("utf-8")
+        cred = credentials.Certificate(json.loads(decoded_json))
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error(f"Erreur Firebase : {e}")
 
 db = firestore.client()
+client = Groq(api_key="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")
+USER_ID = "monsieur_sezer"
 
-# ================= UTILS =================
+# --- UTILS (VOTRE SYSTÈME) ---
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-def categorize_message(text: str) -> str:
-    text_lower = text.lower()
-    if any(k in text_lower for k in ["projet", "créer", "développer", "assistant"]):
-        return "projet"
-    elif any(k in text_lower for k in ["aime", "préférence", "goût"]):
-        return "preference"
-    elif any(k in text_lower for k in ["règle", "instruction", "doit"]):
-        return "regle"
-    else:
-        return "conversation"
-
 def is_memory_worthy(text: str) -> bool:
-    """Filtre les messages inutiles"""
     blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
-    if len(text.strip()) < 10:
+    if len(text.strip()) < 10: # Ajusté pour plus de flexibilité
         return False
     if text.lower().strip() in blacklist:
         return False
     return True
 
-# ================= MÉMOIRE =================
-def save_memory(user_id: str, content: str, confidence: float = 0.9):
-    if not is_memory_worthy(content):
-        return
-    category = categorize_message(content)
-    memory_hash = hash_text(content)
-    ref = db.collection("users").document(user_id).collection("memory").document(memory_hash)
-    if not ref.get().exists:
-        ref.set({
-            "category": category,
-            "content": content,
-            "created_at": datetime.utcnow(),
-            "confidence": confidence
-        })
+# --- INTERFACE ---
+st.set_page_config(page_title="DELTA AGI", page_icon="🌐", layout="wide")
+st.title("🌐 DELTA : Système de Mémoire Hachée")
 
-def get_context(user_id: str, limit: int = 5):
-    """Récupère uniquement les messages pertinents pour le contexte"""
-    memories = db.collection("users").document(user_id).collection("memory") \
-                 .order_by("created_at", direction=firestore.Query.DESCENDING).stream()
-    context = []
-    for m in memories:
-        data = m.to_dict()
-        if len(data["content"]) > 15:  # ignore les messages trop courts
-            context.append(data)
-        if len(context) >= limit:
-            break
-    return context
+# --- RÉCUPÉRATION MÉMOIRE ---
+mem_ref = db.collection("users").document(USER_ID).collection("memory")
+memories = mem_ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(10).stream()
+context_list = [m.to_dict() for m in memories]
 
-# ================= RÉPONSE DELTA =================
-def delta_response(user_id: str, user_message: str):
-    save_memory(user_id, user_message)
-    context = get_context(user_id)
+with st.sidebar:
+    st.header("🧠 Mémoire Vive (Hash)")
+    for m in context_list:
+        st.caption(f"[{m.get('category')}] {m.get('content')}")
 
-    # Phrase style Jarvis
-    context_note = ""
-    if context:
-        context_note = f"(Pour rappel : {context[0]['content']}) "
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    # Résumé du message
-    if len(user_message) < 15:
-        user_message_summary = "ce que tu viens de dire"
-    else:
-        user_message_summary = f"'{user_message}'"
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    response = f"Bien sûr, Boran. {context_note}J'ai compris {user_message_summary}. Que souhaites-tu que je fasse ensuite ?"
-    return response
+# --- CORE PROCESS ---
+if prompt := st.chat_input("Ordre direct..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.markdown(prompt)
 
-# ================= STREAMLIT UI =================
-st.set_page_config(page_title="Delta Jarvis Chat 🤖", layout="centered")
-st.title("Delta Jarvis 🤖")
-st.write("💬 Discute avec Delta comme avec Jarvis. Écris ton message et appuie sur Entrée.")
+    # 1. TEST DE PERTINENCE (VOTRE SYSTÈME)
+    if is_memory_worthy(prompt):
+        m_hash = hash_text(prompt)
+        
+        # 2. ANALYSE IA POUR CATÉGORISATION
+        try:
+            analysis = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "Tu es un système AGI. Catégorise l'info. Réponds en JSON: {'category': '...'} "},
+                    {"role": "user", "content": f"Catégorise ceci : {prompt}"}
+                ],
+                response_format={"type": "json_object"}
+            )
+            cat = json.loads(analysis.choices[0].message.content).get("category", "conversation")
+            
+            # 3. SAUVEGARDE FIREBASE
+            ref = mem_ref.document(m_hash)
+            if not ref.get().exists:
+                ref.set({
+                    "category": cat,
+                    "content": prompt,
+                    "created_at": datetime.utcnow(),
+                    "confidence": 0.95
+                })
+                st.toast("🧬 Nouvelle synapse créée.")
+        except Exception as e:
+            st.error(f"Erreur mémoire : {e}")
 
-# Historique de chat
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-user_id = "boran"
-
-# Formulaire chat interactif
-with st.form(key="chat_form", clear_on_submit=True):
-    user_input = st.text_input("Écris ici...", placeholder="Tape ton message et appuie sur Entrée")
-    submit = st.form_submit_button("Envoyer")
-
-    if submit and user_input.strip() != "":
-        # Ajouter ton message dans l'historique
-        st.session_state.chat_history.append({"role": "user", "message": user_input})
-
-        # Réponse Delta
-        response = delta_response(user_id, user_input)
-        st.session_state.chat_history.append({"role": "delta", "message": response})
-
-# Affichage du chat
-for chat in st.session_state.chat_history:
-    if chat["role"] == "user":
-        st.markdown(f"**Toi :** {chat['message']}")
-    else:
-        st.markdown(f"**Delta :** {chat['message']}")
+    # 4. RÉPONSE STYLE JARVIS
+    with st.chat_message("assistant"):
+        context_note = f"Archives récentes : {json.dumps(context_list)}"
+        sys_instr = f"Tu es DELTA (Jarvis). {context_note}. Sois concis et efficace."
+        
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:]
+        ).choices[0].message.content
+        
+        st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.rerun()
