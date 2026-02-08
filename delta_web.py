@@ -6,7 +6,7 @@ import hashlib
 
 # ================= INIT FIREBASE =================
 if not firebase_admin._apps:
-    cred_json = st.secrets["firebase_key"]  # clé Firebase depuis Streamlit secrets
+    cred_json = st.secrets["firebase_key"]
     cred = credentials.Certificate(cred_json)
     firebase_admin.initialize_app(cred)
 
@@ -17,7 +17,6 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 def categorize_message(text: str) -> str:
-    """Classe automatiquement le type de message"""
     text_lower = text.lower()
     if any(k in text_lower for k in ["projet", "créer", "développer", "assistant"]):
         return "projet"
@@ -38,7 +37,6 @@ def is_memory_worthy(text: str) -> bool:
 
 # ================= MÉMOIRE =================
 def save_memory(user_id: str, content: str, confidence: float = 0.9):
-    """Enregistre une mémoire Delta"""
     if not is_memory_worthy(content):
         return
     category = categorize_message(content)
@@ -53,7 +51,6 @@ def save_memory(user_id: str, content: str, confidence: float = 0.9):
         })
 
 def get_context(user_id: str, limit: int = 5):
-    """Récupère le contexte récent pour Delta"""
     memories = db.collection("users").document(user_id).collection("memory") \
                  .order_by("created_at", direction=firestore.Query.DESCENDING) \
                  .limit(limit).stream()
@@ -61,17 +58,12 @@ def get_context(user_id: str, limit: int = 5):
 
 # ================= RÉPONSE DELTA =================
 def delta_response(user_id: str, user_message: str):
-    """Génère une réponse Delta façon Jarvis"""
-    # Sauvegarde mémoire
     save_memory(user_id, user_message)
-
-    # Contexte récent
     context = get_context(user_id)
     intro = "Bien sûr, Boran. "
     context_note = ""
     if context:
         context_note = f"(Pour rappel : {context[0]['content']}) "
-
     response = f"{intro}{context_note}J'ai compris : '{user_message}'. Que souhaites-tu que je fasse ensuite ?"
     return response
 
@@ -86,20 +78,18 @@ if "chat_history" not in st.session_state:
 
 user_id = "boran"
 
-# Barre de saisie
-user_input = st.text_input("Écris ici...", key="input", placeholder="Tape ton message et appuie sur Entrée")
+# Chat input
+with st.form(key="chat_form", clear_on_submit=True):
+    user_input = st.text_input("Écris ici...", placeholder="Tape ton message et appuie sur Entrée")
+    submit = st.form_submit_button("Envoyer")
+    
+    if submit and user_input.strip() != "":
+        # Ajouter ton message dans l'historique
+        st.session_state.chat_history.append({"role": "user", "message": user_input})
 
-# Envoi du message
-if user_input:
-    # Ajouter ton message dans l'historique
-    st.session_state.chat_history.append({"role": "user", "message": user_input})
-
-    # Réponse Delta
-    response = delta_response(user_id, user_input)
-    st.session_state.chat_history.append({"role": "delta", "message": response})
-
-    # Efface le champ texte après envoi
-    st.session_state.input = ""
+        # Réponse Delta
+        response = delta_response(user_id, user_input)
+        st.session_state.chat_history.append({"role": "delta", "message": response})
 
 # Affichage du chat
 for chat in st.session_state.chat_history:
