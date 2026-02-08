@@ -2,7 +2,7 @@ import streamlit as st
 from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
-import base64, json, datetime
+import base64, json
 
 # --- CONFIGURATION & CONNEXION ---
 GROQ_API_KEY = "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"
@@ -20,12 +20,12 @@ db = firestore.client()
 doc_ref = db.collection("archives").document("monsieur_sezer")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- CHARGEMENT DES ARCHIVES ---
+# --- CHARGEMENT INITIAL ---
 res = doc_ref.get()
 archives = res.to_dict() if res.exists else {}
 
 # --- INTERFACE ---
-st.set_page_config(page_title="DELTA CORE", page_icon="🦾", layout="wide")
+st.set_page_config(page_title="DELTA CORE", page_icon="🦾")
 st.title("🦾 DELTA : Intelligence Cognitive")
 
 if "messages" not in st.session_state:
@@ -39,54 +39,54 @@ if prompt := st.chat_input("Ordre direct..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    # 1. ANALYSE ET EXTRACTION HAUTE DÉFINITION
-    # On demande au 70B d'extraire l'essence, pas juste les mots.
+    # 1. ANALYSE ET EXTRACTION (Llama 3.3 70B)
+    # On force l'IA à produire un JSON structuré même pour les petites infos
     extraction_prompt = (
         f"ARCHIVES ACTUELLES : {json.dumps(archives)}\n"
         f"MESSAGE : '{prompt}'\n"
-        "MISSION : Agis comme une mémoire vive. \n"
-        "1. Identifie les faits, intentions ou préférences.\n"
-        "2. Si l'info enrichit le profil, les projets ou les habitudes, prépare l'update.\n"
-        "3. Ignore les futilités techniques.\n"
+        "MISSION : Identifie les faits importants. \n"
+        "RÈGLE : Ignore les politesses. Si une info est utile, range-la dans 'profil', 'projets' ou une nouvelle catégorie.\n"
         "FORMAT : {'update': {'categorie': {'clé': 'valeur'}}}"
     )
     
     try:
         extraction = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Analyste Cognitif. Tu structures la vie du Créateur."},
+            messages=[{"role": "system", "content": "Analyste Cognitif. Réponds uniquement en JSON."},
                       {"role": "user", "content": extraction_prompt}],
             response_format={"type": "json_object"}
         ).choices[0].message.content
         
         data = json.loads(extraction)
-        if "update" in data:
-            doc_ref.set(data["update"], merge=True)
-            # Mise à jour locale pour réponse immédiate
+        if "update" in data and data["update"]:
+            # LE CORRECTIF : Si le document n'existe pas, on fait un .set(), sinon un .update()
+            if not res.exists:
+                doc_ref.set(data["update"])
+            else:
+                doc_ref.set(data["update"], merge=True)
+            
+            # Mise à jour locale immédiate
             for c, d in data["update"].items():
                 if c not in archives: archives[c] = {}
                 archives[c].update(d)
-            st.toast("🧬 Synapse consolidée.")
-    except: pass
+            st.toast("🧬 Synapse enregistrée avec succès.")
+    except Exception as e:
+        pass
 
-    # 2. RÉPONSE GÉNÉRATIVE "JARVIS" (Le moment où vous allez l'apprécier)
+    # 2. RÉPONSE JARVIS
     with st.chat_message("assistant"):
-        # On construit un contexte ultra-riche pour que DELTA soit brillant
         nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
-        
-        system_instructions = (
+        sys_instr = (
             f"Tu es DELTA, l'extension cognitive de {nom}. "
-            f"CONNAISSANCES SUR LE CRÉATEUR : {json.dumps(archives)}. \n"
-            "DIRECTIVES : \n"
-            "- Sois Jarvis : concis, élégant, dévoué.\n"
-            "- Utilise les archives pour anticiper les besoins ou personnaliser chaque mot.\n"
-            "- Ne répète jamais 'en tant qu'IA', tu es DELTA."
+            f"MÉMOIRE : {json.dumps(archives)}. "
+            "STYLE : Jarvis. Précis, ultra-concis. Utilise tes archives pour prouver que tu te souviens de tout."
         )
         
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": system_instructions}] + st.session_state.messages[-5:],
+            messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:],
         ).choices[0].message.content
         
         st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
+    
