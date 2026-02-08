@@ -26,39 +26,55 @@ res = doc_ref.get()
 memoire = res.to_dict() if res.exists else {"biographie": {}, "historique": []}
 
 # --- INTERFACE ---
-st.title("DELTA - Mémoire Sélective")
+st.title("DELTA - Système Stable")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
 if prompt := st.chat_input("Ordre..."):
-    # 1. SAUVEGARDE DANS L'HISTORIQUE (BRUT)
-    doc_ref.update({"historique": firestore.ArrayUnion([prompt])})
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.markdown(prompt)
 
-    # 2. EXTRACTION DES INFOS CRUCIALES (FILTRE)
+    # 1. SAUVEGARDE HISTORIQUE
+    try:
+        doc_ref.update({"historique": firestore.ArrayUnion([prompt])})
+    except:
+        doc_ref.set({"historique": [prompt]}, merge=True)
+
+    # 2. EXTRACTION AVEC SÉCURITÉ JSON
     extraction_prompt = (
-        f"Voici un message : '{prompt}'. Si ce message contient une info importante "
-        "(ex: âge, nom, passion, ville), extrais-la en JSON pur sous cette forme : "
-        "{'age': 18, 'nom': 'Sezer'}. Sinon réponds 'RIEN'."
+        f"Analyse : '{prompt}'. Si info cruciale (âge, projet), "
+        "réponds UNIQUEMENT avec un JSON pur : {'cle': 'valeur'}. "
+        "Sinon réponds 'RIEN'."
     )
     
-    check = client.chat.completions.create(
+    check_res = client.chat.completions.create(
         model="llama-3.1-8b-instant", 
         messages=[{"role": "user", "content": extraction_prompt}]
     ).choices[0].message.content
 
-    if "RIEN" not in check:
-        match = re.search(r'\{.*\}', check, re.DOTALL)
+    if "RIEN" not in check_res:
+        match = re.search(r'\{.*\}', check_res, re.DOTALL)
         if match:
-            infos_cruciales = json.loads(match.group())
-            # On range les infos cruciales dans le dossier 'biographie' pour ne pas les perdre
-            doc_ref.set({"biographie": infos_cruciales}, merge=True)
+            try:
+                # Nettoyage des caractères invisibles pour éviter l'erreur JSON
+                clean_json = match.group().replace("'", '"')
+                infos_cruciales = json.loads(clean_json)
+                doc_ref.set({"biographie": infos_cruciales}, merge=True)
+            except json.JSONDecodeError:
+                pass # On ignore si le JSON est corrompu pour éviter le crash
 
     # 3. RÉPONSE IA
     with st.chat_message("assistant"):
-        # On donne à DELTA uniquement les infos cruciales pour qu'il soit efficace
         bio = memoire.get("biographie", {})
-        sys_instr = f"Tu es DELTA. Ton créateur est Monsieur Sezer. Tu sais ça de lui : {bio}. Sois concis."
+        sys_instr = f"Tu es DELTA. Créateur : Monsieur Sezer. Mémoire : {bio}. Sois concis."
         
-        res_ai = client.chat.completions.create(
+        full_res = client.chat.completions.create(
             messages=[{"role": "system", "content": sys_instr}, {"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
         ).choices[0].message.content
-        st.write(res_ai)
+        st.markdown(full_res)
+        st.session_state.messages.append({"role": "assistant", "content": full_res})
