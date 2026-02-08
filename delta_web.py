@@ -2,8 +2,7 @@ import streamlit as st
 from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
-import base64, json
-from datetime import datetime
+import base64, json, re
 
 # --- CONFIGURATION ---
 GROQ_API_KEY = "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"
@@ -22,53 +21,44 @@ db = firestore.client()
 doc_ref = db.collection("memoire").document("profil_monsieur")
 client = Groq(api_key=GROQ_API_KEY)
 
-# --- CHARGEMENT DE LA MÉMOIRE ---
+# --- CHARGEMENT ---
 res = doc_ref.get()
-# On récupère l'historique pour que DELTA sache ce qui a été dit avant
-donnees_memoire = res.to_dict() if res.exists else {"historique": []}
-memoire_texte = ", ".join(donnees_memoire.get("historique", []))
+memoire = res.to_dict() if res.exists else {"biographie": {}, "historique": []}
 
 # --- INTERFACE ---
-st.set_page_config(page_title="DELTA", layout="wide")
-st.markdown("<style>button {display:none;} #MainMenu, footer, header {visibility:hidden;}</style>", unsafe_allow_html=True)
+st.title("DELTA - Mémoire Sélective")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
-
-# --- TRAITEMENT ---
 if prompt := st.chat_input("Ordre..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    # 1. SAUVEGARDE DANS L'HISTORIQUE (BRUT)
+    doc_ref.update({"historique": firestore.ArrayUnion([prompt])})
 
-    # 1. SAUVEGARDE PAR EMPILEMENT (Firestore ArrayUnion)
-    try:
-        # Ajoute le nouveau message à la liste sans effacer les anciens
-        doc_ref.update({
-            "historique": firestore.ArrayUnion([prompt]),
-            "derniere_maj": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-    except:
-        # Crée le document s'il n'existe pas encore
-        doc_ref.set({"historique": [prompt]}, merge=True)
+    # 2. EXTRACTION DES INFOS CRUCIALES (FILTRE)
+    extraction_prompt = (
+        f"Voici un message : '{prompt}'. Si ce message contient une info importante "
+        "(ex: âge, nom, passion, ville), extrais-la en JSON pur sous cette forme : "
+        "{'age': 18, 'nom': 'Sezer'}. Sinon réponds 'RIEN'."
+    )
+    
+    check = client.chat.completions.create(
+        model="llama-3.1-8b-instant", 
+        messages=[{"role": "user", "content": extraction_prompt}]
+    ).choices[0].message.content
 
-    # 2. RÉPONSE AVEC CONTEXTE MÉMOIRE
+    if "RIEN" not in check:
+        match = re.search(r'\{.*\}', check, re.DOTALL)
+        if match:
+            infos_cruciales = json.loads(match.group())
+            # On range les infos cruciales dans le dossier 'biographie' pour ne pas les perdre
+            doc_ref.set({"biographie": infos_cruciales}, merge=True)
+
+    # 3. RÉPONSE IA
     with st.chat_message("assistant"):
-        sys_instr = (
-            f"Tu es DELTA. Ton créateur est Monsieur Sezer. "
-            f"Voici ce que tu sais de lui (MÉMOIRE) : {memoire_texte}. "
-            "Sois concis, dévoué et utilise ces infos pour tes réponses."
-        )
+        # On donne à DELTA uniquement les infos cruciales pour qu'il soit efficace
+        bio = memoire.get("biographie", {})
+        sys_instr = f"Tu es DELTA. Ton créateur est Monsieur Sezer. Tu sais ça de lui : {bio}. Sois concis."
         
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": sys_instr},
-                {"role": "user", "content": prompt}
-            ],
+        res_ai = client.chat.completions.create(
+            messages=[{"role": "system", "content": sys_instr}, {"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
-        )
-        response = chat_completion.choices[0].message.content
-        st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        ).choices[0].message.content
+        st.write(res_ai)
