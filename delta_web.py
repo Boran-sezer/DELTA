@@ -43,6 +43,7 @@ def get_memories(branch_name, limit=50):
         return []
 
 def merge_similar_memories(memories):
+    """Fusionne doublons pour ne pas saturer la mémoire"""
     merged = []
     seen_hashes = set()
     for m in memories:
@@ -61,6 +62,7 @@ def summarize_context(branch_name, max_chars=500):
     return "\n".join(lines)[:max_chars]
 
 def cleanup_old_memories(days=30):
+    """Supprime automatiquement les souvenirs low-priority anciens"""
     if not db: return
     cutoff = datetime.utcnow() - timedelta(days=days)
     memory_ref = db.collection("memory")
@@ -77,9 +79,9 @@ def cleanup_old_memories(days=30):
                 souvenirs_ref.document(doc.id).delete()
 
 def is_memory_worthy(text: str) -> dict:
-    """Optimisé : mémorise tout ce qui est important, fusionne doublons, évite branches inutiles"""
+    """Système de tri ultra intelligent"""
     blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
-    important_keywords = ["nom", "prénom", "âge", "ville", "surnom", "pseudo", "email"]
+    important_keywords = ["nom", "prénom", "âge", "ville", "surnom", "pseudo", "email", "projet", "hobby"]
 
     lower_text = text.lower().strip()
     
@@ -91,13 +93,13 @@ def is_memory_worthy(text: str) -> dict:
     if any(k in lower_text for k in important_keywords):
         return {"is_worthy": True, "priority": "high", "branch": "Memory"}
     
-    # Vérifie si le texte est déjà présent pour éviter doublon
+    # Vérifie si texte déjà présent → éviter doublon
     existing_memories = get_memories("Memory")
     for m in existing_memories:
         if lower_text in m.get("content","").lower():
             return {"is_worthy": False, "priority": m.get("priority","medium"), "branch": "Memory"}
     
-    # Sinon LLM décide
+    # Sinon LLM décide avec tri intelligent
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -112,11 +114,12 @@ def is_memory_worthy(text: str) -> dict:
             res["branch"] = "Memory"
         return res
     except:
+        # Si erreur LLM → mémoriser par défaut
         return {"is_worthy": True, "priority": "medium", "branch": "Memory"}
 
 # --- INTERFACE ---
-st.set_page_config(page_title="DELTA AGI Ultra", page_icon="🌐", layout="wide")
-st.title("🌐 DELTA : Jarvis Ultra-Intelligent")
+st.set_page_config(page_title="DELTA AGI Ultimate", page_icon="🌐", layout="wide")
+st.title("🌐 DELTA : Jarvis Légendaire")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "À vos ordres. Le système est parfaitement synchronisé."}]
@@ -131,12 +134,12 @@ if prompt := st.chat_input("Commandez Jarvis..."):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Analyse mémoire
+    # Analyse mémoire ultra-intelligente
     mem_analysis = is_memory_worthy(prompt)
     branch_name = mem_analysis.get("branch", "Memory")
     doc_hash = hash_text(prompt)
 
-    # Écriture silencieuse si utile
+    # Écriture silencieuse uniquement si utile
     if db and mem_analysis.get("is_worthy"):
         try:
             db.collection("memory").document(branch_name).collection("souvenirs").document(doc_hash).set({
@@ -149,12 +152,12 @@ if prompt := st.chat_input("Commandez Jarvis..."):
         except:
             pass
 
-    cleanup_old_memories()  # Nettoyage automatique
+    cleanup_old_memories()  # Nettoyage automatique et intelligent
 
     # Réponse Jarvis
     with st.chat_message("assistant"):
         ctx = summarize_context(branch_name)
-        sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Sois concis, intelligent et bluffant."
+        sys_instr = f"Tu es Jarvis. Contexte: {ctx}. Réponds de façon ultra pertinente, concise et bluffante."
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
