@@ -20,15 +20,21 @@ if not firebase_admin._apps:
 db = firestore.client()
 USER_ID = "monsieur_sezer"
 
-# --- LOGIQUE DE STRUCTURE ---
-def get_recent_memories(limit=15):
+# --- UTILS MÉMOIRE ---
+def hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def is_memory_worthy(text: str) -> bool:
+    blacklist = ["salut", "ok", "mdr", "lol", "?", "oui", "non"]
+    return len(text.strip()) >= 10 and text.lower().strip() not in blacklist
+
+def get_recent_memories(limit=10):
     try:
-        # On cible la collection 'archives' pour créer le premier dossier
-        memories = db.collection("archives").document(USER_ID).collection("branches") \
-                     .order_by("created_at", direction=firestore.Query.DESCENDING) \
-                     .limit(limit).stream()
+        mem_ref = db.collection("users").document(USER_ID).collection("memory")
+        memories = mem_ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit).stream()
         return [m.to_dict() for m in memories]
-    except Exception:
+    except Exception as e:
+        st.error(f"Erreur récupération mémoire : {e}")
         return []
 
 # --- INITIALISATION GROQ ---
@@ -36,67 +42,85 @@ client = Groq(api_key="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"
 
 # --- INTERFACE ---
 st.set_page_config(page_title="DELTA AGI", page_icon="🌐", layout="wide")
-st.title("🌐 DELTA : Déploiement de Structure")
+st.title("🌐 DELTA : Système de Mémoire Jarvis")
 
+# Sidebar : souvenirs récents
 context_list = get_recent_memories()
-
 with st.sidebar:
-    st.header("🧠 Branches Lux")
+    st.header("🧠 Mémoire Vive")
     if context_list:
         for m in context_list:
-            st.write(f"📁 **{m.get('category')}** : {m.get('content')}")
+            st.caption(f"[{m.get('category')}] {m.get('content')}")
     else:
-        st.info("Base de données vierge. En attente d'initialisation...")
+        st.info("Aucun souvenir pour le moment")
+    if st.button("🔄 Actualiser"):
+        context_list = get_recent_memories()
 
+# Session state pour le chat
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Affichage du chat
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# --- PROCESSUS DE CRÉATION DE BRANCHES ---
-if prompt := st.chat_input("Monsieur Sezer, donnez un ordre pour initialiser les dossiers..."):
+# --- PROCESSUS PRINCIPAL ---
+if prompt := st.chat_input("Monsieur Sezer, donnez un ordre à Jarvis..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    try:
-        # L'IA définit l'architecture de la branche
-        analysis = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Tu es une IA forte. Crée une structure de dossier. Réponds en JSON: {'branch': 'nom_du_dossier', 'topic': 'sujet'}"},
-                {"role": "user", "content": f"Organise cette info : {prompt}"}
-            ],
-            response_format={"type": "json_object"}
-        )
-        
-        res = json.loads(analysis.choices[0].message.content)
-        m_hash = hashlib.sha256(prompt.encode()).hexdigest()
-        
-        # CRÉATION PHYSIQUE DANS FIREBASE
-        # Chemin : archives (Collection) -> monsieur_sezer (Document) -> branches (Sous-collection)
-        doc_ref = db.collection("archives").document(USER_ID).collection("branches").document(m_hash)
-        
-        doc_ref.set({
-            "category": res.get("branch", "Général"),
-            "content": prompt,
-            "topic": res.get("topic", "Divers"),
-            "created_at": datetime.utcnow()
-        })
-        
-        st.toast("📁 Dossier et branche créés dans Firebase.")
-        
-    except Exception as e:
-        st.error(f"Erreur de déploiement : {e}")
+    # 1. Analyse et stockage mémoire
+    if is_memory_worthy(prompt):
+        try:
+            # Catégorisation automatique
+            analysis = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "Tu es Jarvis. Catégorise chaque information en JSON : {'category':'...', 'topic':'...'}"},
+                    {"role": "user", "content": f"Analyse cette info : {prompt}"}
+                ],
+                response_format={"type": "json_object"}
+            )
+            res = json.loads(analysis.choices[0].message.content)
+            cat = res.get("category", "Général")
+            topic = res.get("topic", "Divers")
 
-    # RÉPONSE JARVIS
+            # Stockage dans Firebase
+            m_hash = hash_text(prompt)
+            mem_ref = db.collection("users").document(USER_ID).collection("memory").document(m_hash)
+            if not mem_ref.get().exists:
+                mem_ref.set({
+                    "category": cat,
+                    "topic": topic,
+                    "content": prompt,
+                    "created_at": datetime.utcnow()
+                })
+                st.success("🧬 Souvenir enregistré.")
+            else:
+                st.info("Souvenir déjà présent.")
+        except Exception as e:
+            st.error(f"Erreur stockage mémoire : {e}")
+
+    # 2. Récupérer mémoire à jour
+    context_list = get_recent_memories()
+
+    # 3. Réponse Jarvis contextualisée
     with st.chat_message("assistant"):
-        sys_instr = f"Tu es Jarvis. Tu viens de structurer une nouvelle branche dans Firebase pour Monsieur Sezer."
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-3:]
-        ).choices[0].message.content
-        st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
-    
-    st.rerun()
+        context_str = "\n".join([f"- {m['content']}" for m in context_list])
+        sys_instr = (
+            f"Tu es Jarvis, assistant de Monsieur Sezer. "
+            f"Voici tes souvenirs récents : {context_str}. "
+            "Réponds de façon concise, brillante et directe. Ne mentionne jamais que tu es une IA."
+        )
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:]
+            ).choices[0].message.content
+
+            st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        except Exception as e:
+            st.error(f"Erreur Groq : {e}")
