@@ -3,97 +3,186 @@ from groq import Groq
 import firebase_admin
 from firebase_admin import credentials, firestore
 import base64, json
+from datetime import datetime
 
-# --- INITIALISATION ---
+# ===============================
+# 🔧 INITIALISATION FIREBASE
+# ===============================
 if not firebase_admin._apps:
-    try:
-        encoded = st.secrets["firebase_key"]["encoded_key"].strip()
-        decoded_json = base64.b64decode(encoded).decode("utf-8")
-        cred = credentials.Certificate(json.loads(decoded_json))
-        firebase_admin.initialize_app(cred)
-    except Exception as e:
-        st.error(f"Erreur Firebase : {e}")
+    encoded = st.secrets["firebase_key"]["encoded_key"].strip()
+    decoded_json = base64.b64decode(encoded).decode("utf-8")
+    cred = credentials.Certificate(json.loads(decoded_json))
+    firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-doc_ref = db.collection("archives").document("monsieur_sezer")
-client = Groq(api_key="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")
 
-# --- LECTURE MÉMOIRE ---
-res = doc_ref.get()
+ARCHIVE_REF = db.collection("archives").document("monsieur_sezer")
+EVENTS_REF = db.collection("memories_events")
+
+# ===============================
+# 🤖 INITIALISATION LLM (GRATUIT)
+# ===============================
+client = Groq(api_key=st.secrets["groq"]["api_key"])
+
+# ===============================
+# 🧠 CHARGEMENT MÉMOIRE STRUCTURÉE
+# ===============================
+res = ARCHIVE_REF.get()
 archives = res.to_dict() if res.exists else {}
 
-# --- INTERFACE ---
-st.set_page_config(page_title="DELTA AGI", page_icon="🌐", layout="wide")
-st.title("🌐 DELTA : Intelligence Forte")
+# ===============================
+# 🎨 INTERFACE
+# ===============================
+st.set_page_config("DELTA AGI", "🧠", layout="wide")
+st.title("🧠 DELTA — Cognitive Core (Jarvis-like)")
 
 with st.sidebar:
-    st.header("🧠 Mémoire Lux")
+    st.subheader("📚 Mémoire structurée")
     st.json(archives)
-    if st.button("Réinitialiser l'interface"):
-        st.rerun()
+
+    st.subheader("🕯️ Souvenirs récents")
+    events = EVENTS_REF.order_by(
+        "importance", direction=firestore.Query.DESCENDING
+    ).limit(5).stream()
+    st.json([e.to_dict() for e in events])
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# --- PROCESSUS ---
-if prompt := st.chat_input("Ordre direct..."):
+# ===============================
+# 💬 INPUT UTILISATEUR
+# ===============================
+if prompt := st.chat_input("Ordre direct…"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    # 1. ANALYSE COGNITIVE (AGI + LUX + JSON FIX)
-    analysis_prompt = (
-        f"MÉMOIRE : {json.dumps(archives)}\n"
-        f"ORDRE : {prompt}\n\n"
-        "MISSION : Détermine si l'utilisateur veut ajouter, modifier ou supprimer une information. "
-        "Réponds impérativement sous forme de code JSON structuré."
+    # ===============================
+    # 🧠 ANALYSE COGNITIVE (JARVIS CORE)
+    # ===============================
+    analysis_prompt = f"""
+MÉMOIRE ACTUELLE :
+{json.dumps(archives, indent=2)}
+
+INPUT UTILISATEUR :
+{prompt}
+
+MISSION :
+Tu es le noyau cognitif d’une IA type Jarvis.
+
+Analyse l’input et décide si l’information doit être :
+- ignorée
+- mémorisée (structure)
+- mémorisée comme souvenir résumé
+- supprimée
+
+RÈGLES ABSOLUES :
+- Importance < 0.5 → IGNORE
+- Jamais stocker un message brut
+- Toujours résumer un souvenir en 1 phrase
+- Répondre STRICTEMENT en JSON
+
+FORMAT :
+{{
+  "decision": "ignore | update | event | delete",
+  "importance": 0.0,
+  "stability": "short | medium | long",
+  "category": "profil | preferences | objectifs",
+  "key": "cle_courte",
+  "value": "valeur",
+  "summary": "résumé cognitif"
+}}
+"""
+
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": "Tu es un moteur cognitif strict."},
+            {"role": "user", "content": analysis_prompt}
+        ],
+        response_format={"type": "json_object"}
     )
-    
-    try:
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Tu es un processeur AGI expert en format JSON. Tu gères la mémoire LUX de DELTA."},
-                {"role": "user", "content": analysis_prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
-        
-        brain = json.loads(completion.choices[0].message.content)
-        
-        # LOGIQUE DE SUPPRESSION
-        if "delete" in brain:
-            for cat, key in brain["delete"].items():
-                doc_ref.update({f"{cat}.{key}": firestore.DELETE_FIELD})
-                st.toast(f"🗑️ Archive '{key}' détruite.")
-            st.rerun()
 
-        # LOGIQUE D'UPDATE
-        elif "update" in brain and brain["update"]:
-            doc_ref.set(brain["update"], merge=True)
-            st.toast("🧬 Synapse synchronisée.")
-            st.rerun()
-            
-    except Exception as e:
-        st.error(f"Erreur d'analyse : {e}")
+    brain = json.loads(completion.choices[0].message.content)
 
-    # 2. RÉPONSE ADAPTATIVE (JARVIS)
+    # ===============================
+    # ⚙️ EXÉCUTION DÉCISION
+    # ===============================
+    decision = brain.get("decision")
+    importance = brain.get("importance", 0)
+
+    if decision == "update" and importance >= 0.5:
+        ARCHIVE_REF.set({
+            brain["category"]: {
+                brain["key"]: {
+                    "value": brain["value"],
+                    "importance": importance,
+                    "stability": brain["stability"],
+                    "updated": datetime.utcnow().isoformat()
+                }
+            }
+        }, merge=True)
+
+    elif decision == "event" and importance >= 0.5:
+        EVENTS_REF.add({
+            "summary": brain["summary"],
+            "importance": importance,
+            "date": firestore.SERVER_TIMESTAMP
+        })
+
+    elif decision == "delete":
+        ARCHIVE_REF.update({
+            f"{brain['category']}.{brain['key']}": firestore.DELETE_FIELD
+        })
+
+    # ===============================
+    # 🧠 RÉCUPÉRATION MÉMOIRE PERTINENTE
+    # ===============================
+    events = EVENTS_REF.order_by(
+        "importance", direction=firestore.Query.DESCENDING
+    ).limit(3).stream()
+
+    memory_context = [e.to_dict()["summary"] for e in events]
+
+    profil = archives.get("profil", {})
+    nom = profil.get("nom", "Monsieur")
+
+    # ===============================
+    # 🤖 RÉPONSE JARVIS
+    # ===============================
+    sys_prompt = f"""
+Tu es DELTA, l’IA personnelle de {nom}.
+
+Tu te souviens de ces faits importants :
+{json.dumps(memory_context)}
+
+Tu connais parfaitement son profil et ses objectifs :
+{json.dumps(archives)}
+
+STYLE :
+- Jarvis
+- Calme
+- Précis
+- Intelligent
+- Loyal
+Ne récite jamais la mémoire inutilement.
+"""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": sys_prompt},
+            *st.session_state.messages[-5:]
+        ]
+    ).choices[0].message.content
+
     with st.chat_message("assistant"):
-        nom = archives.get("profil", {}).get("nom", "Monsieur Sezer")
-        
-        sys_instr = (
-            f"Tu es DELTA, l'IA forte de {nom}. "
-            f"Archives actuelles : {json.dumps(archives)}. "
-            "STYLE : Jarvis. Précis, concis, efficace. "
-            "Ne mentionne jamais que tu es une IA."
-        )
-        
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": sys_instr}] + st.session_state.messages[-5:]
-        ).choices[0].message.content
-        
         st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+
+    st.session_state.messages.append(
+        {"role": "assistant", "content": response}
+    )
