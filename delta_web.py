@@ -33,7 +33,6 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 def get_branches():
-    """Récupère toutes les branches existantes"""
     if not db: return []
     try:
         return [doc.id for doc in db.collection("memory").stream()]
@@ -85,19 +84,13 @@ def cleanup_old_memories(days=30):
                 souvenirs_ref.document(doc.id).delete()
 
 def identify_branch(text: str) -> str:
-    """
-    Détermine la branche adaptée pour cette info.
-    Si info sur une personne existante → sa branche
-    Sinon → crée une nouvelle branche (nom propre détecté) ou Memory par défaut
-    """
     branches = get_branches()
     text_lower = text.lower()
     for branch in branches:
-        # simple heuristique : si le prénom de la branche apparaît dans le texte
         if branch.lower() in text_lower:
             return branch
-    # Sinon, s’il contient prénom/nom détectable → nouvelle branche
-    # Exemple simple : si texte contient "mon prénom est Boran" -> crée "Boran"
+
+    # Sinon LLM mais fallback sécurisé
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -108,9 +101,10 @@ def identify_branch(text: str) -> str:
             response_format={"type": "text"}
         )
         branch_name = analysis.choices[0].message.content.strip()
-        if not branch_name:
+        # Sécurisation branch_name
+        if not branch_name or any(c in branch_name for c in "/\\.#$[]"):
             branch_name = "Memory"
-        return branch_name
+        return branch_name.replace(" ", "_")
     except:
         return "Memory"
 
@@ -124,14 +118,12 @@ def is_memory_worthy(text: str) -> dict:
     if any(k in lower_text for k in important_keywords):
         return {"is_worthy": True, "priority": "high", "branch": identify_branch(text)}
 
-    # Vérifie si déjà présent
     branch = identify_branch(text)
     existing_memories = get_memories(branch)
     for m in existing_memories:
         if lower_text in m.get("content","").lower():
             return {"is_worthy": False, "priority": m.get("priority","medium"), "branch": branch}
 
-    # Sinon LLM décide
     try:
         analysis = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -178,8 +170,8 @@ if prompt := st.chat_input("Commandez Jarvis..."):
                 "branch": branch_name,
                 "created_at": datetime.utcnow()
             }, merge=True)
-        except:
-            pass
+        except Exception as e:
+            st.error(f"Erreur écriture Firebase : {e}")
 
     cleanup_old_memories()
 
